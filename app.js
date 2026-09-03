@@ -38,6 +38,29 @@ const b64decode = (str) => decodeURIComponent(escape(atob(str)));
 function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } }
 function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} }
 
+// Si la app se abrió con la llave dentro del link (#k=... o ?k=...),
+// la guarda en este dispositivo y limpia la URL para que no quede a la vista.
+// Así los compañeros no configuran nada: solo abren el link.
+function ingestKeyFromUrl() {
+  try {
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const qs = new URLSearchParams(location.search);
+    const key = (hash.get("k") || hash.get("key") || qs.get("k") || qs.get("key") || "").trim();
+    if (key) {
+      setToken(key);
+      history.replaceState(null, "", location.origin + location.pathname);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+// Arma el link para compartir con la llave adentro.
+function buildShareLink() {
+  const base = location.origin + location.pathname;
+  return `${base}#k=${encodeURIComponent(getToken())}`;
+}
+
 function emptyData() {
   return { people: [...DEFAULT_PEOPLE], expenses: [], months: {} };
 }
@@ -95,6 +118,9 @@ const els = {
   saveTokenBtn: $("save-token-btn"),
   clearTokenBtn: $("clear-token-btn"),
   cancelTokenBtn: $("cancel-token-btn"),
+  shareBlock: $("share-block"),
+  shareLink: $("share-link"),
+  copyLinkBtn: $("copy-link-btn"),
 };
 
 // ---- Acceso a GitHub (la "base de datos") ------------------------------
@@ -372,7 +398,28 @@ function openAccountDialog() {
   els.tokenInput.value = getToken();
   els.tokenStatus.textContent = "";
   els.tokenStatus.className = "token-status";
+  refreshShareBlock();
   els.accountDialog.showModal();
+}
+
+// Muestra el link para compartir solo si ya hay una llave guardada.
+function refreshShareBlock() {
+  const has = !!getToken();
+  els.shareBlock.classList.toggle("hidden", !has);
+  if (has) els.shareLink.value = buildShareLink();
+}
+
+async function copyShareLink() {
+  const link = buildShareLink();
+  try {
+    await navigator.clipboard.writeText(link);
+    els.copyLinkBtn.textContent = "¡Copiado!";
+  } catch {
+    els.shareLink.select();
+    document.execCommand("copy");
+    els.copyLinkBtn.textContent = "¡Copiado!";
+  }
+  setTimeout(() => { els.copyLinkBtn.textContent = "Copiar"; }, 1500);
 }
 
 async function verifyAndSaveToken() {
@@ -394,7 +441,8 @@ async function verifyAndSaveToken() {
     els.tokenStatus.className = "token-status ok";
     state.connected = true;
     schedulePolling();
-    setTimeout(() => { els.accountDialog.close(); refresh(); }, 900);
+    refreshShareBlock();
+    refresh();
   } catch (e) {
     setToken("");
     els.tokenStatus.textContent = "❌ " + (e.message || "No se pudo validar la llave.");
@@ -462,9 +510,11 @@ function wireEvents() {
     els.tokenInput.value = "";
     els.tokenStatus.textContent = "Desconectado. Quedás en modo lectura.";
     els.tokenStatus.className = "token-status";
+    refreshShareBlock();
     schedulePolling();
     render();
   });
+  els.copyLinkBtn.addEventListener("click", copyShareLink);
   els.cancelTokenBtn.addEventListener("click", () => els.accountDialog.close());
 
   // Refrescar al volver a la pestaña
@@ -475,10 +525,15 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
+  const gotKeyFromLink = ingestKeyFromUrl();
   state.connected = !!getToken();
   render();
   await refresh();
   schedulePolling();
+  // Si entraron por el link mágico, avisamos que ya quedó listo.
+  if (gotKeyFromLink && state.connected) {
+    els.connBadge.textContent = "¡Conectado!";
+  }
 }
 
 start();

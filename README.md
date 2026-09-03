@@ -42,14 +42,24 @@ Una persona (por ej. el dueño del repo) crea **una llave** y se la comparte a l
 
 > Esa misma llave la usan los 4. Como solo puede escribir en el repo `split-super`, el riesgo es mínimo; si se pierde, la revocás y creás otra.
 
-### 3. Conectarse en la app
+### 3. Conectarte vos (el dueño de la llave)
 
-Cada persona, la primera vez:
-1. Abre la app y toca **🔑 Conectar**.
-2. Pega la llave y toca **Guardar llave**.
-3. Listo: queda guardada en su celular/PC y ya puede cargar gastos. El resto solo la ve (modo lectura) hasta que también conecten.
+1. Abrí la app y tocá **🔑 Conectar**.
+2. Pegá la llave y tocá **Guardar llave**.
+3. Listo: ya podés cargar gastos.
 
-> 💡 En el celular: "Agregar a pantalla de inicio" para que quede como una app.
+### 4. Sumar a los demás **sin que configuren nada** (link mágico)
+
+Después de conectarte, en el mismo cuadro **🔑 Cuenta** aparece un bloque **"Sumar a los demás"** con un **link para compartir**.
+
+1. Tocá **Copiar** y mandáselo a tus compañeros por privado (WhatsApp).
+2. Ellos solo tienen que **abrir el link una vez**: la app se conecta sola (la llave viaja dentro del link y queda guardada en su celular). **No configuran nada, no tocan el repo, no pegan nada.**
+3. Cada uno hace "Agregar a pantalla de inicio" y ya lo usan como una app normal.
+
+> ⚠️ Compartí ese link **solo con tus compañeros**, no lo publiques: la llave va adentro.
+> Si alguna vez se filtra, revocás la llave en GitHub y generás otra (y mandás un link nuevo).
+
+> 💡 Sin llave, la app funciona igual pero en **modo lectura** (solo ver).
 
 ---
 

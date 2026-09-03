@@ -68,6 +68,15 @@ body {
 .token-status.ok { color: var(--ok); }
 .token-status.warn { color: var(--danger); }
 
+/* Bloque compartir link */
+.share-block { margin-top: 4px; }
+.share-block hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.share-block h3 { margin: 0 0 6px; font-size: 1rem; }
+.hint.small { font-size: 0.78rem; margin-top: 8px; }
+.share-row { display: flex; gap: 8px; align-items: center; }
+.share-row input { font-size: 0.8rem; }
+.share-row .btn-primary { flex: 0 0 auto; }
+
 .del-placeholder { width: 22px; }
 
 button:disabled { opacity: 0.45; cursor: not-allowed; }

@@ -110,6 +110,22 @@
         <input type="password" id="token-input" placeholder="github_pat_..." autocomplete="off" />
       </div>
       <div id="token-status" class="token-status"></div>
+
+      <!-- Bloque para compartir: solo aparece cuando ya estás conectado -->
+      <div id="share-block" class="share-block hidden">
+        <hr />
+        <h3>📲 Sumar a los demás</h3>
+        <p class="hint">
+          Mandales este link (por WhatsApp, privado). Con solo <b>abrirlo</b>, la app les queda lista para
+          guardar — <b>no tienen que configurar nada</b>.
+        </p>
+        <div class="share-row">
+          <input type="text" id="share-link" readonly />
+          <button type="button" id="copy-link-btn" class="btn-primary">Copiar</button>
+        </div>
+        <p class="hint small">⚠️ Compartilo solo con tus compañeros, no lo publiques (la llave viaja dentro del link).</p>
+      </div>
+
       <div class="dialog-actions">
         <button type="button" id="clear-token-btn" class="btn-ghost">Desconectar</button>
         <div class="spacer"></div>
