@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#4f46e5" />
+  <title>Split Súper — Gastos compartidos</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%92%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">
+    <!-- Aviso si falta configurar Firebase -->
+    <div id="config-warning" class="warning hidden">
+      <strong>⚠️ Falta configurar Firebase.</strong>
+      Editá el archivo <code>firebase-config.js</code> con las claves de tu proyecto.
+      Mirá el <a href="https://github.com/" id="readme-link" target="_blank" rel="noopener">README</a> para el paso a paso.
+    </div>
+
+    <header class="app-header">
+      <h1>🛒 Split Súper</h1>
+      <p class="subtitle">Cada uno paga lo que compró — un solo pago, cuentas claras.</p>
+    </header>
+
+    <!-- Selector de mes -->
+    <section class="card">
+      <div class="month-row">
+        <label for="month-picker">Mes</label>
+        <input type="month" id="month-picker" />
+        <span id="sync-status" class="sync-status" title="Estado de conexión">●</span>
+      </div>
+    </section>
+
+    <!-- Formulario para agregar gasto -->
+    <section class="card">
+      <h2>Agregar gasto</h2>
+      <form id="expense-form" class="expense-form">
+        <div class="field">
+          <label for="person-select">¿De quién es?</label>
+          <select id="person-select" required></select>
+        </div>
+        <div class="field grow">
+          <label for="desc-input">Descripción</label>
+          <input type="text" id="desc-input" placeholder="Ej: Leche, shampoo..." maxlength="80" required />
+        </div>
+        <div class="field">
+          <label for="amount-input">Monto</label>
+          <input type="number" id="amount-input" placeholder="0.00" min="0" step="0.01" inputmode="decimal" required />
+        </div>
+        <button type="submit" class="btn-primary">Agregar</button>
+      </form>
+    </section>
+
+    <!-- Resumen por persona -->
+    <section class="card">
+      <div class="summary-head">
+        <h2>Resumen del mes</h2>
+        <div class="paidby">
+          <label for="paidby-select">Pagó con la tarjeta:</label>
+          <select id="paidby-select"></select>
+        </div>
+      </div>
+      <div id="summary" class="summary"></div>
+      <div class="grand-total">
+        <span>Total del mes</span>
+        <strong id="grand-total">$0.00</strong>
+      </div>
+      <div id="settlement" class="settlement"></div>
+    </section>
+
+    <!-- Lista de gastos -->
+    <section class="card">
+      <div class="summary-head">
+        <h2>Detalle de gastos</h2>
+        <button id="manage-people-btn" class="btn-ghost" type="button">Editar nombres</button>
+      </div>
+      <div id="expense-list" class="expense-list"></div>
+    </section>
+
+    <footer class="app-footer">
+      <p>Los datos se comparten en tiempo real entre todos. Hecho con Firebase.</p>
+    </footer>
+  </div>
+
+  <!-- Modal para editar nombres -->
+  <dialog id="people-dialog">
+    <form method="dialog" class="people-form">
+      <h2>Editar nombres</h2>
+      <p class="hint">Poné los nombres de las personas que comparten los gastos.</p>
+      <div id="people-inputs"></div>
+      <div class="dialog-actions">
+        <button type="button" id="add-person-btn" class="btn-ghost">+ Agregar persona</button>
+        <div class="spacer"></div>
+        <button type="button" id="cancel-people-btn" class="btn-ghost">Cancelar</button>
+        <button type="button" id="save-people-btn" class="btn-primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
