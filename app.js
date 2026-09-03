@@ -158,7 +158,10 @@ async function writeRepo(data, sha, message) {
     body: JSON.stringify(body),
   });
   if (res.status === 409) { const e = new Error("conflict"); e.conflict = true; throw e; }
-  if (res.status === 401 || res.status === 403) { const e = new Error("auth"); e.auth = true; throw e; }
+  if (res.status === 401 || res.status === 403) {
+    let detail = ""; try { detail = (await res.json()).message || ""; } catch {}
+    const e = new Error(detail || "auth"); e.auth = true; e.detail = detail; throw e;
+  }
   if (!res.ok) throw new Error(`GitHub ${res.status}: ${await res.text()}`);
   const json = await res.json();
   return json.content.sha;
@@ -192,7 +195,11 @@ async function mutate(applyFn, message) {
   } catch (e) {
     console.error(e);
     if (e.auth) {
-      alert("La llave de acceso no es válida o no tiene permiso de escritura. Revisala en 🔑 Conectar.");
+      alert(
+        "No se pudo guardar: la llave no tiene permiso de ESCRITURA.\n\n" +
+        (e.detail ? "GitHub dice: " + e.detail + "\n\n" : "") +
+        "Solución: en el token, Permissions → Contents debe estar en 'Read and write'."
+      );
       openAccountDialog();
     } else {
       alert("No se pudo guardar. Revisá tu conexión.");
@@ -422,22 +429,47 @@ async function copyShareLink() {
   setTimeout(() => { els.copyLinkBtn.textContent = "Copiar"; }, 1500);
 }
 
+// Prueba REAL de permiso de escritura: crea un archivo temporal y lo borra.
+// No sirve mirar `permissions.push` del repo, porque para el DUEÑO siempre da
+// true (refleja tu rol de dueño, no lo que la llave permite realmente).
+async function testWriteAccess() {
+  const probePath = ".splitsuper-access-check";
+  const url = `https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}/contents/${probePath}`;
+  const put = await fetch(url, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "Verificar acceso de escritura (Split Súper)", content: b64encode("ok"), branch: GITHUB.branch }),
+  });
+  if (put.status === 401) return { ok: false, message: "La llave no es válida (revisala)." };
+  if (put.status === 403) {
+    let d = ""; try { d = (await put.json()).message || ""; } catch {}
+    return { ok: false, message: "La llave no tiene permiso de escritura. En el token, Permissions → Contents debe estar en 'Read and write'." + (d ? " (" + d + ")" : "") };
+  }
+  if (put.status === 422) return { ok: true }; // el archivo ya existía: igual pudo escribir
+  if (put.status !== 200 && put.status !== 201) return { ok: false, message: "No se pudo verificar (GitHub " + put.status + ")." };
+  // Limpieza: borrar el archivo de prueba.
+  try {
+    const sha = (await put.json())?.content?.sha;
+    if (sha) {
+      await fetch(url, {
+        method: "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Limpiar verificación (Split Súper)", sha, branch: GITHUB.branch }),
+      });
+    }
+  } catch {}
+  return { ok: true };
+}
+
 async function verifyAndSaveToken() {
   const t = els.tokenInput.value.trim();
   if (!t) { els.tokenStatus.textContent = "Pegá una llave o tocá Desconectar."; els.tokenStatus.className = "token-status warn"; return; }
-  els.tokenStatus.textContent = "Verificando…"; els.tokenStatus.className = "token-status";
-  // Guardamos temporalmente para que authHeaders() la use, y probamos leyendo.
-  setToken(t);
+  els.tokenStatus.textContent = "Verificando permiso de escritura…"; els.tokenStatus.className = "token-status";
+  setToken(t); // authHeaders() la usa para la prueba
   try {
-    await readRepo(); // si el token es inválido igual puede leer (repo público); probamos permisos con un no-op controlado
-    // Comprobación real de escritura: intentamos leer el repo vía endpoint que requiere el token válido.
-    const check = await fetch(`https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}`, { headers: authHeaders() });
-    if (check.status === 401) throw new Error("La llave no es válida.");
-    const info = await check.json();
-    if (!info.permissions || !info.permissions.push) {
-      throw new Error("La llave es válida pero no tiene permiso para escribir en este repo.");
-    }
-    els.tokenStatus.textContent = "✅ Llave válida. ¡Ya podés guardar gastos!";
+    const res = await testWriteAccess();
+    if (!res.ok) throw new Error(res.message);
+    els.tokenStatus.textContent = "✅ ¡Llave válida y con permiso de escritura! Ya podés guardar.";
     els.tokenStatus.className = "token-status ok";
     state.connected = true;
     schedulePolling();
@@ -445,6 +477,8 @@ async function verifyAndSaveToken() {
     refresh();
   } catch (e) {
     setToken("");
+    state.connected = false;
+    refreshShareBlock();
     els.tokenStatus.textContent = "❌ " + (e.message || "No se pudo validar la llave.");
     els.tokenStatus.className = "token-status warn";
   }
