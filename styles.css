@@ -46,6 +46,33 @@ body {
 
 .card h2 { margin: 0 0 12px; font-size: 1.1rem; }
 
+/* Barra de estado */
+.statusbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.statusbar .month-row { flex: 1; min-width: 180px; }
+.conn { display: flex; align-items: center; gap: 8px; }
+.conn-badge {
+  font-size: 0.78rem; font-weight: 700; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); white-space: nowrap;
+}
+.conn-badge.reading { color: var(--muted); }
+.conn-badge.connected { color: #0b0e1f; background: var(--ok); border-color: var(--ok); }
+.conn-badge.saving { color: #0b0e1f; background: var(--accent); border-color: var(--accent); }
+.conn-badge.offline { color: #fff; background: var(--danger); border-color: var(--danger); }
+
+.readonly-hint {
+  margin: 12px 0 0; font-size: 0.85rem; color: #fbbf24;
+  background: #2a2410; border: 1px solid #7c4a12; padding: 10px 12px; border-radius: 10px;
+}
+
+.token-status { font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; color: var(--muted); }
+.token-status.ok { color: var(--ok); }
+.token-status.warn { color: var(--danger); }
+
+.del-placeholder { width: 22px; }
+
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Selector de mes */
 .month-row { display: flex; align-items: center; gap: 10px; }
 .month-row label { font-weight: 600; color: var(--muted); }

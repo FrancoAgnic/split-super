@@ -10,24 +10,20 @@
 </head>
 <body>
   <div id="app">
-    <!-- Aviso si falta configurar Firebase -->
-    <div id="config-warning" class="warning hidden">
-      <strong>⚠️ Falta configurar Firebase.</strong>
-      Editá el archivo <code>firebase-config.js</code> con las claves de tu proyecto.
-      Mirá el <a href="https://github.com/" id="readme-link" target="_blank" rel="noopener">README</a> para el paso a paso.
-    </div>
-
     <header class="app-header">
       <h1>🛒 Split Súper</h1>
       <p class="subtitle">Cada uno paga lo que compró — un solo pago, cuentas claras.</p>
     </header>
 
-    <!-- Selector de mes -->
-    <section class="card">
+    <!-- Barra de estado / conexión -->
+    <section class="card statusbar">
       <div class="month-row">
         <label for="month-picker">Mes</label>
         <input type="month" id="month-picker" />
-        <span id="sync-status" class="sync-status" title="Estado de conexión">●</span>
+      </div>
+      <div class="conn">
+        <span id="conn-badge" class="conn-badge reading" title="Estado">Cargando…</span>
+        <button id="account-btn" class="btn-ghost" type="button">🔑 Conectar</button>
       </div>
     </section>
 
@@ -47,8 +43,11 @@
           <label for="amount-input">Monto</label>
           <input type="number" id="amount-input" placeholder="0.00" min="0" step="0.01" inputmode="decimal" required />
         </div>
-        <button type="submit" class="btn-primary">Agregar</button>
+        <button type="submit" class="btn-primary" id="add-btn">Agregar</button>
       </form>
+      <p id="readonly-hint" class="readonly-hint hidden">
+        👀 Estás en <b>modo lectura</b>. Para cargar o borrar gastos, tocá <b>🔑 Conectar</b> y pegá la llave de acceso.
+      </p>
     </section>
 
     <!-- Resumen por persona -->
@@ -78,7 +77,7 @@
     </section>
 
     <footer class="app-footer">
-      <p>Los datos se comparten en tiempo real entre todos. Hecho con Firebase.</p>
+      <p>Los datos se guardan en GitHub (<code id="repo-label">este repo</code>). GitHub es el servidor.</p>
     </footer>
   </div>
 
@@ -93,6 +92,29 @@
         <div class="spacer"></div>
         <button type="button" id="cancel-people-btn" class="btn-ghost">Cancelar</button>
         <button type="button" id="save-people-btn" class="btn-primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal para la llave de acceso (token) -->
+  <dialog id="account-dialog">
+    <form method="dialog" class="people-form">
+      <h2>🔑 Conectar para guardar</h2>
+      <p class="hint">
+        Para <b>guardar</b> gastos en GitHub hace falta una llave de acceso (token).
+        Pegá acá la llave que te pasaron. Se guarda <b>solo en este dispositivo</b>, nunca se sube al repo.
+        <a href="https://github.com/FrancoAgnic/split-super#readme" target="_blank" rel="noopener">¿Cómo consigo la llave?</a>
+      </p>
+      <div class="field">
+        <label for="token-input">Llave de acceso</label>
+        <input type="password" id="token-input" placeholder="github_pat_..." autocomplete="off" />
+      </div>
+      <div id="token-status" class="token-status"></div>
+      <div class="dialog-actions">
+        <button type="button" id="clear-token-btn" class="btn-ghost">Desconectar</button>
+        <div class="spacer"></div>
+        <button type="button" id="cancel-token-btn" class="btn-ghost">Cerrar</button>
+        <button type="button" id="save-token-btn" class="btn-primary">Guardar llave</button>
       </div>
     </form>
   </dialog>

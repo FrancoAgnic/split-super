@@ -1,19 +1,20 @@
-// Split Súper — app de gastos compartidos
-// Vanilla JS + Firebase Firestore (sincronización en tiempo real entre todos).
+// Split Súper — gastos compartidos usando GitHub como "servidor".
+// Los datos viven en data.json dentro del repo. Se leen y escriben con la API de GitHub.
+// - Leer: público, sin llave.
+// - Escribir: requiere una llave de acceso (token) guardada solo en este dispositivo.
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore, collection, doc, addDoc, deleteDoc, setDoc,
-  onSnapshot, query, where, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { GITHUB } from "./config.js";
 
-import { firebaseConfig } from "./firebase-config.js";
+// ---- Constantes ---------------------------------------------------------
 
-// ---- Utilidades ---------------------------------------------------------
-
-// Paleta de colores por persona (se asigna por orden).
 const PALETTE = ["#6366f1", "#22d3ee", "#f59e0b", "#34d399", "#f43f5e", "#a78bfa", "#fb7185", "#4ade80"];
 const DEFAULT_PEOPLE = ["Persona 1", "Persona 2", "Persona 3", "Persona 4"];
+const TOKEN_KEY = "splitsuper_token";
+const POLL_MS_CONNECTED = 12000;   // refresco cuando hay llave
+const POLL_MS_READONLY = 60000;    // refresco en modo lectura (evita el límite de la API)
+const API = `https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}/contents/${GITHUB.dataPath}`;
+
+// ---- Utilidades ---------------------------------------------------------
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 }).format(n || 0);
@@ -28,206 +29,293 @@ const colorFor = (people, name) => {
   return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
 };
 
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// Base64 <-> texto con soporte de acentos/emojis.
+const b64encode = (str) => btoa(unescape(encodeURIComponent(str)));
+const b64decode = (str) => decodeURIComponent(escape(atob(str)));
+
+function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } }
+function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} }
+
+function emptyData() {
+  return { people: [...DEFAULT_PEOPLE], expenses: [], months: {} };
+}
+
+// Normaliza para que nunca falten campos.
+function normalize(d) {
+  return {
+    people: Array.isArray(d?.people) && d.people.length ? d.people : [...DEFAULT_PEOPLE],
+    expenses: Array.isArray(d?.expenses) ? d.expenses : [],
+    months: d?.months && typeof d.months === "object" ? d.months : {},
+  };
+}
+
 // ---- Estado -------------------------------------------------------------
 
 const state = {
   month: currentMonthKey(),
-  people: [...DEFAULT_PEOPLE],
-  expenses: [],       // gastos del mes seleccionado
-  paidBy: "",         // quién pagó con la tarjeta este mes
-  db: null,
+  data: emptyData(),
+  sha: null,      // sha del data.json actual (necesario para escribir)
+  online: false,  // se pudo leer del repo
+  connected: false, // hay llave válida guardada
+  busy: false,
 };
 
-let unsubExpenses = null;
-let unsubConfig = null;
-let unsubMonthMeta = null;
+let pollTimer = null;
 
 // ---- Elementos ----------------------------------------------------------
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  configWarning: $("config-warning"),
   monthPicker: $("month-picker"),
-  syncStatus: $("sync-status"),
+  connBadge: $("conn-badge"),
+  accountBtn: $("account-btn"),
   form: $("expense-form"),
+  addBtn: $("add-btn"),
   personSelect: $("person-select"),
   descInput: $("desc-input"),
   amountInput: $("amount-input"),
+  readonlyHint: $("readonly-hint"),
   summary: $("summary"),
   grandTotal: $("grand-total"),
   paidBySelect: $("paidby-select"),
   settlement: $("settlement"),
   expenseList: $("expense-list"),
+  repoLabel: $("repo-label"),
   managePeopleBtn: $("manage-people-btn"),
   peopleDialog: $("people-dialog"),
   peopleInputs: $("people-inputs"),
   addPersonBtn: $("add-person-btn"),
   savePeopleBtn: $("save-people-btn"),
   cancelPeopleBtn: $("cancel-people-btn"),
+  accountDialog: $("account-dialog"),
+  tokenInput: $("token-input"),
+  tokenStatus: $("token-status"),
+  saveTokenBtn: $("save-token-btn"),
+  clearTokenBtn: $("clear-token-btn"),
+  cancelTokenBtn: $("cancel-token-btn"),
 };
 
-// ---- Inicialización de Firebase ----------------------------------------
+// ---- Acceso a GitHub (la "base de datos") ------------------------------
 
-function isConfigured() {
-  return firebaseConfig &&
-    firebaseConfig.apiKey &&
-    !String(firebaseConfig.apiKey).includes("TU_") &&
-    firebaseConfig.projectId &&
-    !String(firebaseConfig.projectId).includes("TU_");
+function authHeaders() {
+  const t = getToken();
+  const h = { Accept: "application/vnd.github+json" };
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
 }
 
-function initFirebase() {
-  if (!isConfigured()) {
-    els.configWarning.classList.remove("hidden");
-    setSync(false);
-    return false;
-  }
-  const app = initializeApp(firebaseConfig);
-  state.db = getFirestore(app);
-  return true;
+// Lee data.json del repo. Devuelve { data, sha }. Si no existe, data vacío.
+async function readRepo() {
+  const url = `${API}?ref=${encodeURIComponent(GITHUB.branch)}&t=${Date.now()}`;
+  const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+  if (res.status === 404) return { data: emptyData(), sha: null };
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  const json = await res.json();
+  let parsed = emptyData();
+  try { parsed = JSON.parse(b64decode((json.content || "").replace(/\n/g, ""))); } catch {}
+  return { data: normalize(parsed), sha: json.sha };
 }
 
-function setSync(online) {
-  els.syncStatus.classList.toggle("online", online);
-  els.syncStatus.classList.toggle("offline", !online);
-  els.syncStatus.title = online ? "Conectado — datos sincronizados" : "Sin conexión";
+// Escribe data.json. Requiere sha (si el archivo existe). Devuelve el nuevo sha.
+async function writeRepo(data, sha, message) {
+  const body = {
+    message,
+    content: b64encode(JSON.stringify(data, null, 2)),
+    branch: GITHUB.branch,
+  };
+  if (sha) body.sha = sha;
+  const res = await fetch(API, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 409) { const e = new Error("conflict"); e.conflict = true; throw e; }
+  if (res.status === 401 || res.status === 403) { const e = new Error("auth"); e.auth = true; throw e; }
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  return json.content.sha;
 }
 
-// ---- Suscripciones a Firestore -----------------------------------------
-
-// Config global (nombres de las personas), compartida por todos.
-function subscribeConfig() {
-  const ref = doc(state.db, "config", "app");
-  unsubConfig = onSnapshot(ref, (snap) => {
-    if (snap.exists() && Array.isArray(snap.data().people) && snap.data().people.length) {
-      state.people = snap.data().people;
-    } else {
-      state.people = [...DEFAULT_PEOPLE];
+// Aplica un cambio de forma segura: relee lo último, aplica, y escribe.
+// Reintenta si hubo un choque (otra persona escribió al mismo tiempo).
+async function mutate(applyFn, message) {
+  if (!getToken()) { openAccountDialog(); return false; }
+  state.busy = true;
+  renderStatus();
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { data, sha } = await readRepo();
+      const next = normalize(data);
+      applyFn(next);
+      try {
+        const newSha = await writeRepo(next, sha, message);
+        state.data = next;
+        state.sha = newSha;
+        state.online = true;
+        render();
+        return true;
+      } catch (e) {
+        if (e.conflict) { await new Promise((r) => setTimeout(r, 300)); continue; }
+        throw e;
+      }
     }
-    renderPeopleControls();
-    render();
-  }, () => setSync(false));
+    alert("Hubo muchos cambios al mismo tiempo. Probá de nuevo en un momento.");
+    return false;
+  } catch (e) {
+    console.error(e);
+    if (e.auth) {
+      alert("La llave de acceso no es válida o no tiene permiso de escritura. Revisala en 🔑 Conectar.");
+      openAccountDialog();
+    } else {
+      alert("No se pudo guardar. Revisá tu conexión.");
+    }
+    return false;
+  } finally {
+    state.busy = false;
+    renderStatus();
+  }
 }
 
-// Metadatos del mes (quién pagó con la tarjeta).
-function subscribeMonthMeta() {
-  if (unsubMonthMeta) unsubMonthMeta();
-  const ref = doc(state.db, "months", state.month);
-  unsubMonthMeta = onSnapshot(ref, (snap) => {
-    state.paidBy = (snap.exists() && snap.data().paidBy) || "";
-    renderPaidBy();
-    renderSettlement();
-  }, () => setSync(false));
+// ---- Carga y refresco ---------------------------------------------------
+
+async function refresh() {
+  try {
+    const { data, sha } = await readRepo();
+    state.data = data;
+    state.sha = sha;
+    state.online = true;
+  } catch (e) {
+    console.error(e);
+    state.online = false;
+  }
+  render();
 }
 
-// Gastos del mes seleccionado.
-function subscribeExpenses() {
-  if (unsubExpenses) unsubExpenses();
-  const q = query(collection(state.db, "expenses"), where("month", "==", state.month));
-  unsubExpenses = onSnapshot(q, (snap) => {
-    setSync(true);
-    state.expenses = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
-    render();
-  }, (err) => {
-    console.error(err);
-    setSync(false);
-  });
-}
-
-// ---- Acciones -----------------------------------------------------------
-
-async function addExpense(person, description, amount) {
-  await addDoc(collection(state.db, "expenses"), {
-    month: state.month,
-    person,
-    description,
-    amount,
-    createdAt: serverTimestamp(),
-    createdAtMs: Date.now(),
-  });
-}
-
-async function removeExpense(id) {
-  await deleteDoc(doc(state.db, "expenses", id));
-}
-
-async function savePeople(people) {
-  await setDoc(doc(state.db, "config", "app"), { people }, { merge: true });
-}
-
-async function setPaidBy(person) {
-  await setDoc(doc(state.db, "months", state.month), { paidBy: person }, { merge: true });
+function schedulePolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  const ms = state.connected ? POLL_MS_CONNECTED : POLL_MS_READONLY;
+  pollTimer = setInterval(() => { if (!state.busy && !document.hidden) refresh(); }, ms);
 }
 
 // ---- Cálculos -----------------------------------------------------------
 
+function monthExpenses() {
+  return state.data.expenses
+    .filter((e) => e.month === state.month)
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+
 function totalsByPerson() {
   const totals = {};
-  state.people.forEach((p) => (totals[p] = 0));
-  state.expenses.forEach((e) => {
-    totals[e.person] = (totals[e.person] || 0) + Number(e.amount || 0);
-  });
+  state.data.people.forEach((p) => (totals[p] = 0));
+  monthExpenses().forEach((e) => { totals[e.person] = (totals[e.person] || 0) + Number(e.amount || 0); });
   return totals;
 }
 
 function grandTotal() {
-  return state.expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  return monthExpenses().reduce((s, e) => s + Number(e.amount || 0), 0);
+}
+
+function paidByForMonth() {
+  return state.data.months?.[state.month]?.paidBy || "";
+}
+
+// ---- Acciones -----------------------------------------------------------
+
+function addExpense(person, description, amount) {
+  return mutate((d) => {
+    d.expenses.push({ id: uid(), month: state.month, person, description, amount, ts: Date.now() });
+  }, `Agregar gasto: ${description} (${person})`);
+}
+
+function removeExpense(id) {
+  return mutate((d) => { d.expenses = d.expenses.filter((e) => e.id !== id); }, "Eliminar gasto");
+}
+
+function savePeople(people) {
+  return mutate((d) => { d.people = people; }, "Actualizar nombres");
+}
+
+function setPaidBy(person) {
+  return mutate((d) => {
+    d.months = d.months || {};
+    d.months[state.month] = { ...(d.months[state.month] || {}), paidBy: person };
+  }, `Marcar pagador de ${state.month}`);
 }
 
 // ---- Render -------------------------------------------------------------
 
-function renderPeopleControls() {
-  // Select de "de quién es el gasto"
-  const prev = els.personSelect.value;
-  els.personSelect.innerHTML = state.people
-    .map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`)
-    .join("");
-  if (state.people.includes(prev)) els.personSelect.value = prev;
-}
-
-function renderPaidBy() {
-  const opts = ['<option value="">— nadie —</option>']
-    .concat(state.people.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`));
-  els.paidBySelect.innerHTML = opts.join("");
-  els.paidBySelect.value = state.paidBy || "";
-}
-
 function render() {
+  els.repoLabel.textContent = `${GITHUB.owner}/${GITHUB.repo}`;
+  renderStatus();
+  renderPeopleControls();
+  renderPaidBy();
   renderSummary();
   renderList();
   renderSettlement();
+}
+
+function renderStatus() {
+  state.connected = !!getToken();
+  const badge = els.connBadge;
+  if (state.busy) {
+    badge.textContent = "Guardando…"; badge.className = "conn-badge saving";
+  } else if (!state.online) {
+    badge.textContent = "Sin conexión"; badge.className = "conn-badge offline";
+  } else if (state.connected) {
+    badge.textContent = "Conectado"; badge.className = "conn-badge connected";
+  } else {
+    badge.textContent = "Solo lectura"; badge.className = "conn-badge reading";
+  }
+  els.accountBtn.textContent = state.connected ? "🔑 Cuenta" : "🔑 Conectar";
+  const ro = !state.connected;
+  els.readonlyHint.classList.toggle("hidden", !ro);
+  els.addBtn.disabled = ro;
+  els.descInput.disabled = ro;
+  els.amountInput.disabled = ro;
+  els.personSelect.disabled = ro;
+}
+
+function renderPeopleControls() {
+  const prev = els.personSelect.value;
+  els.personSelect.innerHTML = state.data.people
+    .map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`).join("");
+  if (state.data.people.includes(prev)) els.personSelect.value = prev;
+}
+
+function renderPaidBy() {
+  const cur = paidByForMonth();
+  const opts = ['<option value="">— nadie —</option>']
+    .concat(state.data.people.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`));
+  els.paidBySelect.innerHTML = opts.join("");
+  els.paidBySelect.value = cur;
+  els.paidBySelect.disabled = !state.connected;
 }
 
 function renderSummary() {
   const totals = totalsByPerson();
   const gt = grandTotal();
   els.grandTotal.textContent = fmt(gt);
-
-  els.summary.innerHTML = state.people
-    .map((p) => {
-      const val = totals[p] || 0;
-      const pct = gt > 0 ? (val / gt) * 100 : 0;
-      const color = colorFor(state.people, p);
-      return `
-        <div class="summary-row">
-          <div class="who"><span class="dot" style="background:${color}"></span>${escapeHtml(p)}</div>
-          <div class="amount">${fmt(val)}</div>
-          <div class="bar"><span style="width:${pct.toFixed(1)}%;background:${color}"></span></div>
-        </div>`;
-    })
-    .join("");
+  els.summary.innerHTML = state.data.people.map((p) => {
+    const val = totals[p] || 0;
+    const pct = gt > 0 ? (val / gt) * 100 : 0;
+    const color = colorFor(state.data.people, p);
+    return `
+      <div class="summary-row">
+        <div class="who"><span class="dot" style="background:${color}"></span>${escapeHtml(p)}</div>
+        <div class="amount">${fmt(val)}</div>
+        <div class="bar"><span style="width:${pct.toFixed(1)}%;background:${color}"></span></div>
+      </div>`;
+  }).join("");
 }
 
 function renderSettlement() {
   const totals = totalsByPerson();
-  const payer = state.paidBy;
-  if (!payer || !state.people.includes(payer) || grandTotal() === 0) {
-    els.settlement.innerHTML = "";
-    return;
-  }
-  const rows = state.people
+  const payer = paidByForMonth();
+  if (!payer || !state.data.people.includes(payer) || grandTotal() === 0) { els.settlement.innerHTML = ""; return; }
+  const rows = state.data.people
     .filter((p) => p !== payer && (totals[p] || 0) > 0)
     .map((p) => `<div class="settle-row"><b>${escapeHtml(p)}</b> le debe <b>${fmt(totals[p])}</b> a <b>${escapeHtml(payer)}</b></div>`);
   const header = `<div class="settle-row"><b>${escapeHtml(payer)}</b> pagó todo con la tarjeta. Cada uno le devuelve lo suyo:</div>`;
@@ -235,58 +323,89 @@ function renderSettlement() {
 }
 
 function renderList() {
-  if (!state.expenses.length) {
-    els.expenseList.innerHTML = `<div class="empty">Todavía no hay gastos este mes. ¡Agregá el primero! ☝️</div>`;
+  const items = monthExpenses();
+  if (!items.length) {
+    els.expenseList.innerHTML = `<div class="empty">Todavía no hay gastos este mes.</div>`;
     return;
   }
-  els.expenseList.innerHTML = state.expenses
-    .map((e) => {
-      const color = colorFor(state.people, e.person);
-      return `
-        <div class="expense-item">
-          <span class="tag" style="background:${color}">${escapeHtml(e.person)}</span>
-          <span class="desc" title="${escapeAttr(e.description)}">${escapeHtml(e.description)}</span>
-          <span class="val">${fmt(e.amount)}</span>
-          <button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar">✕</button>
-        </div>`;
-    })
-    .join("");
+  els.expenseList.innerHTML = items.map((e) => {
+    const color = colorFor(state.data.people, e.person);
+    const del = state.connected
+      ? `<button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar">✕</button>`
+      : `<span class="del-placeholder"></span>`;
+    return `
+      <div class="expense-item">
+        <span class="tag" style="background:${color}">${escapeHtml(e.person)}</span>
+        <span class="desc" title="${escapeAttr(e.description)}">${escapeHtml(e.description)}</span>
+        <span class="val">${fmt(e.amount)}</span>
+        ${del}
+      </div>`;
+  }).join("");
 }
 
 // ---- Modal editar nombres ----------------------------------------------
 
 function openPeopleDialog() {
-  renderPeopleInputs(state.people);
+  renderPeopleInputs(state.data.people);
   els.peopleDialog.showModal();
 }
-
 function renderPeopleInputs(people) {
-  els.peopleInputs.innerHTML = people
-    .map((p, i) => `
-      <div class="person-input-row">
-        <input type="text" value="${escapeAttr(p)}" maxlength="24" placeholder="Nombre ${i + 1}" />
-        <button type="button" class="remove" title="Quitar" aria-label="Quitar">✕</button>
-      </div>`)
-    .join("");
+  els.peopleInputs.innerHTML = people.map((p, i) => `
+    <div class="person-input-row">
+      <input type="text" value="${escapeAttr(p)}" maxlength="24" placeholder="Nombre ${i + 1}" />
+      <button type="button" class="remove" title="Quitar" aria-label="Quitar">✕</button>
+    </div>`).join("");
   els.peopleInputs.querySelectorAll(".remove").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      const rows = els.peopleInputs.querySelectorAll(".person-input-row");
-      if (rows.length > 1) e.target.closest(".person-input-row").remove();
+      if (els.peopleInputs.querySelectorAll(".person-input-row").length > 1)
+        e.target.closest(".person-input-row").remove();
     });
   });
 }
-
 function collectPeopleFromInputs() {
-  return [...els.peopleInputs.querySelectorAll("input")]
-    .map((i) => i.value.trim())
-    .filter((v) => v.length > 0);
+  return [...els.peopleInputs.querySelectorAll("input")].map((i) => i.value.trim()).filter((v) => v.length > 0);
+}
+
+// ---- Modal llave (token) ------------------------------------------------
+
+function openAccountDialog() {
+  els.tokenInput.value = getToken();
+  els.tokenStatus.textContent = "";
+  els.tokenStatus.className = "token-status";
+  els.accountDialog.showModal();
+}
+
+async function verifyAndSaveToken() {
+  const t = els.tokenInput.value.trim();
+  if (!t) { els.tokenStatus.textContent = "Pegá una llave o tocá Desconectar."; els.tokenStatus.className = "token-status warn"; return; }
+  els.tokenStatus.textContent = "Verificando…"; els.tokenStatus.className = "token-status";
+  // Guardamos temporalmente para que authHeaders() la use, y probamos leyendo.
+  setToken(t);
+  try {
+    await readRepo(); // si el token es inválido igual puede leer (repo público); probamos permisos con un no-op controlado
+    // Comprobación real de escritura: intentamos leer el repo vía endpoint que requiere el token válido.
+    const check = await fetch(`https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}`, { headers: authHeaders() });
+    if (check.status === 401) throw new Error("La llave no es válida.");
+    const info = await check.json();
+    if (!info.permissions || !info.permissions.push) {
+      throw new Error("La llave es válida pero no tiene permiso para escribir en este repo.");
+    }
+    els.tokenStatus.textContent = "✅ Llave válida. ¡Ya podés guardar gastos!";
+    els.tokenStatus.className = "token-status ok";
+    state.connected = true;
+    schedulePolling();
+    setTimeout(() => { els.accountDialog.close(); refresh(); }, 900);
+  } catch (e) {
+    setToken("");
+    els.tokenStatus.textContent = "❌ " + (e.message || "No se pudo validar la llave.");
+    els.tokenStatus.className = "token-status warn";
+  }
 }
 
 // ---- Escapado seguro ----------------------------------------------------
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
@@ -296,43 +415,27 @@ function wireEvents() {
   els.monthPicker.value = state.month;
   els.monthPicker.addEventListener("change", () => {
     state.month = els.monthPicker.value || currentMonthKey();
-    if (state.db) {
-      subscribeExpenses();
-      subscribeMonthMeta();
-    }
+    render();
   });
 
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!state.db) return;
     const person = els.personSelect.value;
     const description = els.descInput.value.trim();
     const amount = Number(els.amountInput.value);
     if (!person || !description || !(amount > 0)) return;
-    try {
-      await addExpense(person, description, amount);
-      els.descInput.value = "";
-      els.amountInput.value = "";
-      els.descInput.focus();
-    } catch (err) {
-      console.error(err);
-      alert("No se pudo guardar el gasto. Revisá tu conexión o las reglas de Firestore.");
-    }
+    const ok = await addExpense(person, description, amount);
+    if (ok) { els.descInput.value = ""; els.amountInput.value = ""; els.descInput.focus(); }
   });
 
   els.expenseList.addEventListener("click", async (e) => {
     const btn = e.target.closest(".del");
-    if (!btn || !state.db) return;
-    if (confirm("¿Eliminar este gasto?")) {
-      try { await removeExpense(btn.dataset.id); }
-      catch (err) { console.error(err); }
-    }
+    if (!btn) return;
+    if (confirm("¿Eliminar este gasto?")) await removeExpense(btn.dataset.id);
   });
 
   els.paidBySelect.addEventListener("change", async () => {
-    if (!state.db) return;
-    try { await setPaidBy(els.paidBySelect.value); }
-    catch (err) { console.error(err); }
+    await setPaidBy(els.paidBySelect.value);
   });
 
   els.managePeopleBtn.addEventListener("click", openPeopleDialog);
@@ -346,30 +449,36 @@ function wireEvents() {
   els.savePeopleBtn.addEventListener("click", async () => {
     const people = collectPeopleFromInputs();
     if (!people.length) { alert("Tiene que haber al menos una persona."); return; }
-    try {
-      if (state.db) await savePeople(people);
-      else { state.people = people; renderPeopleControls(); render(); }
-      els.peopleDialog.close();
-    } catch (err) {
-      console.error(err);
-      alert("No se pudieron guardar los nombres.");
-    }
+    els.peopleDialog.close();
+    await savePeople(people);
   });
+
+  // Modal llave
+  els.accountBtn.addEventListener("click", openAccountDialog);
+  els.saveTokenBtn.addEventListener("click", verifyAndSaveToken);
+  els.clearTokenBtn.addEventListener("click", () => {
+    setToken("");
+    state.connected = false;
+    els.tokenInput.value = "";
+    els.tokenStatus.textContent = "Desconectado. Quedás en modo lectura.";
+    els.tokenStatus.className = "token-status";
+    schedulePolling();
+    render();
+  });
+  els.cancelTokenBtn.addEventListener("click", () => els.accountDialog.close());
+
+  // Refrescar al volver a la pestaña
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 }
 
 // ---- Arranque -----------------------------------------------------------
 
-function start() {
+async function start() {
   wireEvents();
-  renderPeopleControls();
-  renderPaidBy();
+  state.connected = !!getToken();
   render();
-
-  if (initFirebase()) {
-    subscribeConfig();
-    subscribeExpenses();
-    subscribeMonthMeta();
-  }
+  await refresh();
+  schedulePolling();
 }
 
 start();

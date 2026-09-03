@@ -2,57 +2,54 @@
 
 App para dividir los gastos del supermercado entre varias personas **según lo que compró cada una**, no en partes iguales.
 
-Ideal para cuando conviven varias personas, hacen las compras juntos y **pagan todo con una sola tarjeta**, pero cada uno quiere saber cuánto gastó realmente y cuánto le debe a quien puso la tarjeta.
+Ideal para cuando conviven varias personas, hacen las compras juntas y **pagan todo con una sola tarjeta**, pero cada uno quiere saber cuánto gastó realmente y cuánto le debe a quien puso la tarjeta.
 
 - ✅ Cada uno carga sus propios gastos (leche, shampoo, lo que sea).
 - ✅ Se ve el total de cada persona y el total del mes.
 - ✅ Se elige quién pagó con la tarjeta y la app calcula **cuánto le debe cada uno**.
-- ✅ **Sincronización en tiempo real**: los 4 (o los que sean) ven lo mismo desde sus celulares.
+- ✅ **Compartido entre todos**: los datos se guardan en GitHub y todos ven lo mismo.
 - ✅ Se organiza por **mes**.
-- ✅ Web pura (HTML/CSS/JS), se publica **gratis** en GitHub Pages.
+- ✅ Web pura (HTML/CSS/JS) + **GitHub como servidor**. Sin Firebase ni otros servicios.
+
+## 🧠 ¿Cómo guarda los datos? (sin Firebase)
+
+Los gastos se guardan en el archivo **`data.json`** de este mismo repositorio. La app lo lee y lo escribe usando la **API de GitHub**. O sea: **GitHub hace de servidor/base de datos.**
+
+- **Leer** es público y gratis: cualquiera puede abrir la app y ver los gastos.
+- **Escribir** (guardar/borrar un gasto) necesita una **llave de acceso** (un token de GitHub). Esto es obligatorio: GitHub nunca deja escribir sin autenticación (si no, cualquiera en internet podría cargar gastos falsos).
+
+La llave se guarda **solo en el navegador de cada persona** (nunca se sube al repo).
 
 ---
 
-## 🚀 Puesta en marcha (una sola vez)
+## 🚀 Puesta en marcha
 
-La app guarda los gastos en **Firebase Firestore** (base de datos gratis de Google) para que todos vean lo mismo en tiempo real. Necesitás crear un proyecto de Firebase gratuito y pegar sus claves. Son ~5 minutos.
+### 1. Publicar la app (GitHub Pages)
 
-### 1. Configurar Firebase
+1. En este repo: **Settings → Pages**.
+2. **Source**: *Deploy from a branch*. Branch: **`main`**, carpeta **`/ (root)`** → **Save**.
+3. En ~1 minuto la app queda en: `https://francoagnic.github.io/split-super/`
 
-1. Entrá a <https://console.firebase.google.com/> e iniciá sesión con tu cuenta de Google.
-2. Tocá **"Agregar proyecto"** (Add project). Ponele un nombre (ej: `split-super`). Podés desactivar Google Analytics. Creá el proyecto.
-3. Ya dentro del proyecto, en el menú izquierdo andá a **Build → Firestore Database** y tocá **"Crear base de datos"** (Create database).
-   - Elegí ubicación (cualquiera cercana).
-   - Empezá en **"modo de prueba"** (test mode) por ahora. *(Ver nota de seguridad más abajo.)*
-4. Ahora registrá la app web: tocá el ícono **`</>`** (Web) en la pantalla principal del proyecto (o **Configuración del proyecto → Tus apps → Web**).
-   - Ponele un apodo (ej: `split-super-web`) y registrala.
-   - Firebase te va a mostrar un objeto `firebaseConfig` con tus claves. **Copialas.**
-5. Abrí el archivo [`firebase-config.js`](./firebase-config.js) de este repo y pegá tus valores reemplazando los `TU_...`:
+### 2. Crear la llave de acceso (una sola vez)
 
-   ```js
-   export const firebaseConfig = {
-     apiKey: "AIza....",
-     authDomain: "split-super-xxxx.firebaseapp.com",
-     projectId: "split-super-xxxx",
-     storageBucket: "split-super-xxxx.appspot.com",
-     messagingSenderId: "1234567890",
-     appId: "1:1234567890:web:abcdef...",
-   };
-   ```
+Una persona (por ej. el dueño del repo) crea **una llave** y se la comparte a los demás por privado (WhatsApp, etc.).
 
-   > Estas claves son **públicas por diseño** (así funcionan las apps web de Firebase). No son un secreto; la seguridad se maneja con las Reglas de Firestore.
+1. Entrá a <https://github.com/settings/personal-access-tokens/new> (Fine-grained token).
+2. **Token name**: `split-super`. **Expiration**: lo que quieras (ej: 90 días o *No expiration*).
+3. **Repository access** → *Only select repositories* → elegí **`split-super`**.
+4. **Permissions** → *Repository permissions* → **Contents**: poné **Read and write**.
+5. **Generate token** y **copiá** la llave (empieza con `github_pat_...`). ⚠️ Se muestra una sola vez.
 
-6. Guardá y subí el cambio (commit + push).
+> Esa misma llave la usan los 4. Como solo puede escribir en el repo `split-super`, el riesgo es mínimo; si se pierde, la revocás y creás otra.
 
-### 2. Publicar la app en GitHub Pages (gratis)
+### 3. Conectarse en la app
 
-1. En este repo, andá a **Settings → Pages**.
-2. En **"Source"** elegí **Deploy from a branch**.
-3. Branch: `main` (o la que uses) y carpeta `/ (root)`. Guardá.
-4. En un minuto vas a tener una URL tipo `https://TU_USUARIO.github.io/split-super/`.
-5. Compartí esa URL con tus compañeros. ¡Listo! Cada uno la abre en su celular y carga sus gastos.
+Cada persona, la primera vez:
+1. Abre la app y toca **🔑 Conectar**.
+2. Pega la llave y toca **Guardar llave**.
+3. Listo: queda guardada en su celular/PC y ya puede cargar gastos. El resto solo la ve (modo lectura) hasta que también conecten.
 
-> 💡 Tip: en el celular, "Agregar a pantalla de inicio" para que quede como una app.
+> 💡 En el celular: "Agregar a pantalla de inicio" para que quede como una app.
 
 ---
 
@@ -62,48 +59,58 @@ La app guarda los gastos en **Firebase Firestore** (base de datos gratis de Goog
 2. En **Agregar gasto**: elegí de quién es, la descripción y el monto → **Agregar**.
 3. En **Resumen del mes** ves cuánto lleva gastado cada uno y el total.
 4. Elegí en **"Pagó con la tarjeta"** quién puso la tarjeta ese mes: la app muestra cuánto le debe cada uno.
-5. Tocá **"Editar nombres"** para poner los nombres reales de las personas.
+5. Tocá **"Editar nombres"** para poner los nombres reales.
 
-Todo se sincroniza solo entre todos los que tengan la app abierta.
+Los datos se refrescan solos cada pocos segundos, así que todos ven los cambios de todos.
 
 ---
 
-## 🔒 Nota de seguridad (importante)
+## ⚙️ Configuración
 
-Al crear Firestore en **modo de prueba**, cualquiera con las claves podría leer/escribir durante ~30 días. Para uso entre amigos suele alcanzar, pero para dejarlo seguro tenés dos opciones:
+El repo que hace de servidor se define en [`config.js`](./config.js):
 
-- **Opción simple (recomendada para empezar):** dejalo en modo prueba y renová cuando avise. Los datos no son sensibles (gastos de súper).
-- **Opción más segura:** activar autenticación (por ej. login anónimo o con Google) y poner reglas que solo permitan a usuarios autenticados. Si querés, pedíme que te agregue el login.
+```js
+export const GITHUB = {
+  owner: "FrancoAgnic",
+  repo: "split-super",
+  branch: "main",
+  dataPath: "data.json",
+};
+```
 
-Reglas de ejemplo (modo prueba, funciona ya):
+## 🧩 Estructura del proyecto
 
 ```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true; // ⚠️ abierto — cambiar para producción
-    }
+index.html   Estructura de la página
+styles.css   Estilos (tema oscuro, responsive)
+app.js       Lógica + lectura/escritura contra la API de GitHub
+config.js    A qué repo apuntar
+data.json    La "base de datos" (se actualiza sola desde la app)
+```
+
+## 🗂️ Formato de `data.json`
+
+```json
+{
+  "people": ["Ana", "Beto", "Caro", "Dani"],
+  "expenses": [
+    { "id": "abc123", "month": "2026-09", "person": "Ana", "description": "Leche", "amount": 950, "ts": 1725400000000 }
+  ],
+  "months": {
+    "2026-09": { "paidBy": "Ana" }
   }
 }
 ```
 
 ---
 
-## 🧩 Estructura del proyecto
+## ❓ Preguntas frecuentes
 
-```
-index.html          Estructura de la página
-styles.css          Estilos (tema oscuro, responsive)
-app.js              Lógica + conexión a Firestore
-firebase-config.js  Tus claves de Firebase (editar esto)
-```
+**¿Y si dos cargan un gasto al mismo tiempo?** La app relee lo último antes de guardar y reintenta automáticamente, así no se pisan los datos.
 
-## 🛠️ Modelo de datos (Firestore)
+**¿La llave es peligrosa en el celular?** Queda solo en tu navegador y solo sirve para este repo. Si preferís, cada uno puede crear su propia llave en vez de compartir una.
 
-- Colección `expenses`: `{ month, person, description, amount, createdAt }`
-- Documento `config/app`: `{ people: [...] }` — nombres de las personas.
-- Documento `months/{YYYY-MM}`: `{ paidBy }` — quién pagó con la tarjeta ese mes.
+**¿Puedo ver el historial de cambios?** Sí: cada gasto agregado/borrado queda como un commit en el repo. GitHub guarda todo el historial.
 
 ---
 
