@@ -2,7 +2,7 @@
 // Cachea la app para que funcione como app instalada y también sin conexión.
 // Los datos (jsonblob.com) NUNCA se cachean: siempre van a la red.
 
-const CACHE = "splitsuper-v1";
+const CACHE = "splitsuper-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -30,8 +30,8 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Datos: siempre a la red (nunca cache).
-  if (url.hostname.endsWith("jsonblob.com")) return;
+  // Datos (servicio externo): siempre a la red, nunca cache.
+  if (url.origin !== location.origin) return;
   // Solo GET del mismo origen.
   if (req.method !== "GET" || url.origin !== location.origin) return;
 

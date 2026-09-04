@@ -27,11 +27,11 @@ Es una **PWA**: se instala en la pantalla de inicio y se abre como una app (pant
 
 ## 🧠 ¿Dónde se guardan los datos?
 
-En **[jsonblob.com](https://jsonblob.com)**, un almacén de JSON gratis y sin login. Cada grupo es un "blob" con un id, y ese id viaja dentro del link que compartís. Quien tiene el link, ve y edita.
+En un **almacén JSON gratis y sin login** (definido en `config.js`). Cada grupo es un "bin" con un id, y ese id viaja dentro del link que compartís. Quien tiene el link, ve y edita.
 
 Es una app **casual entre amigos**: cualquiera con el link puede editar (no hay seguridad, y está bien así). Si el link se te pierde, cualquiera del grupo que lo tenga guardado te lo puede volver a pasar.
 
-> ⚠️ jsonblob borra los grupos que quedan **sin usarse ~30 días**. Si eso pasa, la app te avisa y te ofrece **recrear el grupo** con los datos que quedaron guardados en tu dispositivo (y te da un link nuevo para repartir).
+> ⚠️ Estos servicios gratuitos pueden borrar grupos que quedan **mucho tiempo sin usarse**. Si eso pasa, la app te avisa y te ofrece **recrear el grupo** con los datos que quedaron guardados en tu dispositivo (y te da un link nuevo para repartir).
 
 ## 🖥️ Publicar la app (GitHub Pages)
 

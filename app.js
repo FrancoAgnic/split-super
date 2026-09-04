@@ -94,15 +94,37 @@ const els = {
 
 // ---- Almacenamiento (jsonblob) -----------------------------------------
 
-const JSON_HEADERS = { "Content-Type": "application/json", Accept: "application/json" };
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+// fetch con detección clara de errores de red / bloqueo del navegador (CORS).
+async function apiFetch(url, opts) {
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    const err = new Error("No se pudo contactar el servidor de datos (¿sin internet o bloqueado por el navegador?).");
+    err.network = true;
+    throw err;
+  }
+}
+
+// Extrae el id del grupo de la respuesta (del cuerpo o, si no, de cabeceras).
+async function extractId(res) {
+  try {
+    const j = await res.clone().json();
+    const id = j.Id || j.id || j._id || j.key || "";
+    if (id) return String(id);
+    if (j.uri) return String(j.uri).split("/").filter(Boolean).pop() || "";
+  } catch {}
+  const loc = res.headers.get("Location") || res.headers.get("X-jsonblob") || "";
+  return loc.split("/").filter(Boolean).pop() || "";
+}
 
 // Crea un grupo nuevo con los datos semilla. Devuelve el id.
 async function createGroup(seed) {
-  const res = await fetch(CONFIG.api, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(seed) });
-  if (!(res.status === 201 || res.ok)) throw new Error("No se pudo crear el grupo (" + res.status + ")");
-  let id = res.headers.get("X-jsonblob");
-  if (!id) { const loc = res.headers.get("Location") || ""; id = loc.split("/").filter(Boolean).pop() || ""; }
-  if (!id) throw new Error("No se pudo obtener el id del grupo.");
+  const res = await apiFetch(CONFIG.api, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(seed) });
+  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al crear el grupo.");
+  const id = await extractId(res);
+  if (!id) throw new Error("El servidor no devolvió el id del grupo.");
   setGroup(id);
   saveBackup(seed);
   return id;
@@ -111,9 +133,9 @@ async function createGroup(seed) {
 // Lee los datos del grupo actual.
 async function readGroup() {
   const id = getGroup();
-  const res = await fetch(`${CONFIG.api}/${id}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+  const res = await apiFetch(`${CONFIG.api}/${id}`, { headers: { Accept: "application/json" }, cache: "no-store" });
   if (res.status === 404) { const e = new Error("expired"); e.expired = true; throw e; }
-  if (!res.ok) throw new Error("read " + res.status);
+  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al leer.");
   const data = normalize(await res.json());
   saveBackup(data);
   return data;
@@ -122,9 +144,9 @@ async function readGroup() {
 // Escribe los datos del grupo actual.
 async function writeGroup(data) {
   const id = getGroup();
-  const res = await fetch(`${CONFIG.api}/${id}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(data) });
+  const res = await apiFetch(`${CONFIG.api}/${id}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(data) });
   if (res.status === 404) { const e = new Error("expired"); e.expired = true; throw e; }
-  if (!res.ok) throw new Error("write " + res.status);
+  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al guardar.");
   saveBackup(data);
 }
 
@@ -375,7 +397,7 @@ function wireEvents() {
       openShareDialog();
     } catch (e) {
       console.error(e);
-      alert("No se pudo crear el grupo. Revisá tu conexión e intentá de nuevo.");
+      alert("No se pudo crear el grupo.\n\nDetalle: " + (e.message || e));
     } finally {
       els.createGroupBtn.disabled = false;
       els.createGroupBtn.textContent = "➕ Crear grupo compartido";
