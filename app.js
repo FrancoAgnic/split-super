@@ -85,6 +85,11 @@ const els = {
   copyLinkBtn: $("copy-link-btn"),
   leaveGroupBtn: $("leave-group-btn"),
   closeShareBtn: $("close-share-btn"),
+  installBanner: $("install-banner"),
+  installBtn: $("install-btn"),
+  installDismiss: $("install-dismiss"),
+  iosDialog: $("ios-dialog"),
+  iosCloseBtn: $("ios-close-btn"),
 };
 
 // ---- Almacenamiento (jsonblob) -----------------------------------------
@@ -427,10 +432,65 @@ function wireEvents() {
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 }
 
+// ---- Instalación como app (PWA) ----------------------------------------
+
+let deferredPrompt = null;
+const LS_INSTALL_DISMISS = "splitsuper_install_dismissed";
+
+const isStandalone = () =>
+  window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const installDismissed = () => { try { return localStorage.getItem(LS_INSTALL_DISMISS) === "1"; } catch { return false; } };
+
+function showInstallBanner() {
+  if (isStandalone() || installDismissed()) return;
+  els.installBanner.classList.remove("hidden");
+}
+function hideInstallBanner() { els.installBanner.classList.add("hidden"); }
+
+function initInstall() {
+  // Registrar el service worker (necesario para que sea instalable y ande offline).
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+
+  // Android/Chrome: guardamos el evento y mostramos el cartel con botón "Instalar".
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    showInstallBanner();
+  });
+  window.addEventListener("appinstalled", () => { deferredPrompt = null; hideInstallBanner(); });
+
+  // iPhone no dispara beforeinstallprompt: si no está instalada, mostramos el cartel igual.
+  if (isIOS() && !isStandalone()) showInstallBanner();
+
+  els.installBtn.addEventListener("click", async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      try { await deferredPrompt.userChoice; } catch {}
+      deferredPrompt = null;
+      hideInstallBanner();
+    } else if (isIOS()) {
+      els.iosDialog.showModal();
+    } else {
+      // Navegador sin soporte de instalación automática.
+      els.iosDialog.showModal();
+    }
+  });
+
+  els.installDismiss.addEventListener("click", () => {
+    hideInstallBanner();
+    try { localStorage.setItem(LS_INSTALL_DISMISS, "1"); } catch {}
+  });
+  els.iosCloseBtn.addEventListener("click", () => els.iosDialog.close());
+}
+
 // ---- Arranque -----------------------------------------------------------
 
 async function start() {
   wireEvents();
+  initInstall();
   ingestGroupFromUrl();
   if (getGroup()) { render(); await refresh(); }
   else { showNoGroup(); }

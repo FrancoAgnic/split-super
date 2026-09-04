@@ -7,9 +7,28 @@
   <title>Split Súper — Gastos compartidos</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%92%3C/text%3E%3C/svg%3E" />
+  <!-- PWA: instalable en la pantalla de inicio -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Split Súper" />
 </head>
 <body>
   <div id="app">
+    <!-- Cartel para instalar la app -->
+    <div id="install-banner" class="install-banner hidden">
+      <div class="install-text">
+        <b>📲 Instalá Split Súper</b>
+        <span>Agregala a tu pantalla de inicio y usala como una app.</span>
+      </div>
+      <div class="install-actions">
+        <button id="install-btn" class="btn-primary" type="button">Instalar</button>
+        <button id="install-dismiss" class="btn-ghost" type="button" aria-label="Cerrar">✕</button>
+      </div>
+    </div>
+
     <header class="app-header">
       <h1>🛒 Split Súper</h1>
       <p class="subtitle">Cada uno paga lo que compró — un solo pago, cuentas claras.</p>
@@ -114,6 +133,23 @@
         <button type="button" id="leave-group-btn" class="btn-ghost">Salir del grupo</button>
         <div class="spacer"></div>
         <button type="button" id="close-share-btn" class="btn-primary">Cerrar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Instrucciones de instalación para iPhone -->
+  <dialog id="ios-dialog">
+    <form method="dialog" class="people-form">
+      <h2>📲 Instalar en iPhone</h2>
+      <p class="hint">En iPhone se agrega desde Safari en 2 pasos:</p>
+      <ol class="ios-steps">
+        <li>Tocá el botón <b>Compartir</b> (el cuadradito con la flecha ↑) abajo en Safari.</li>
+        <li>Elegí <b>“Agregar a inicio”</b> (Add to Home Screen) y confirmá.</li>
+      </ol>
+      <p class="hint">Listo: te queda el ícono de Split Súper en la pantalla de inicio.</p>
+      <div class="dialog-actions">
+        <div class="spacer"></div>
+        <button type="button" id="ios-close-btn" class="btn-primary">Entendido</button>
       </div>
     </form>
   </dialog>

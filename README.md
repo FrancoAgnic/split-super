@@ -18,7 +18,12 @@ Pagan todo con **una sola tarjeta**, pero cada uno carga sus propias cosas y la 
 
 Eso es todo. No hay que instalar ni registrarse en nada.
 
-> 💡 En el celular: "Agregar a pantalla de inicio" para que quede como una app.
+## 📲 Instalar como app
+
+Es una **PWA**: se instala en la pantalla de inicio y se abre como una app (pantalla completa, ícono propio, anda offline para ver los datos).
+
+- **Android/Chrome:** al abrir la app aparece un cartel **"📲 Instalar"** → un toque y queda en el inicio.
+- **iPhone/Safari:** tocá **Compartir** (↑) → **"Agregar a inicio"**. La app te muestra el instructivo si tocás Instalar.
 
 ## 🧠 ¿Dónde se guardan los datos?
 
