@@ -1,16 +1,18 @@
-// Split Súper — gastos compartidos, versión simple (sin login ni tokens).
-// Los datos se guardan en un "blob" JSON en jsonblob.com. El id del grupo
-// viaja en el link. Quien tiene el link, ve y edita. Ideal para amigos.
+// Split Súper — gastos compartidos usando GitHub como "servidor".
+// Los datos viven en data.json dentro del repo. Se leen y escriben con la API de GitHub.
+// - Leer: público, sin llave.
+// - Escribir: requiere una llave de acceso (token) guardada solo en este dispositivo.
 
-import { CONFIG } from "./config.js";
+import { GITHUB } from "./config.js";
 
 // ---- Constantes ---------------------------------------------------------
 
 const PALETTE = ["#6366f1", "#22d3ee", "#f59e0b", "#34d399", "#f43f5e", "#a78bfa", "#fb7185", "#4ade80"];
 const DEFAULT_PEOPLE = ["Persona 1", "Persona 2", "Persona 3", "Persona 4"];
-const LS_GROUP = "splitsuper_group";
-const LS_BACKUP = "splitsuper_backup";
-const POLL_MS = 10000; // refresco cada 10s
+const TOKEN_KEY = "splitsuper_token";
+const POLL_MS_CONNECTED = 12000;   // refresco cuando hay llave
+const POLL_MS_READONLY = 60000;    // refresco en modo lectura (evita el límite de la API)
+const API = `https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}/contents/${GITHUB.dataPath}`;
 
 // ---- Utilidades ---------------------------------------------------------
 
@@ -29,8 +31,41 @@ const colorFor = (people, name) => {
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-function emptyData() { return { people: [...DEFAULT_PEOPLE], expenses: [], months: {} }; }
+// Base64 <-> texto con soporte de acentos/emojis.
+const b64encode = (str) => btoa(unescape(encodeURIComponent(str)));
+const b64decode = (str) => decodeURIComponent(escape(atob(str)));
 
+function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } }
+function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} }
+
+// Si la app se abrió con la llave dentro del link (#k=... o ?k=...),
+// la guarda en este dispositivo y limpia la URL para que no quede a la vista.
+// Así los compañeros no configuran nada: solo abren el link.
+function ingestKeyFromUrl() {
+  try {
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const qs = new URLSearchParams(location.search);
+    const key = (hash.get("k") || hash.get("key") || qs.get("k") || qs.get("key") || "").trim();
+    if (key) {
+      setToken(key);
+      history.replaceState(null, "", location.origin + location.pathname);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+// Arma el link para compartir con la llave adentro.
+function buildShareLink() {
+  const base = location.origin + location.pathname;
+  return `${base}#k=${encodeURIComponent(getToken())}`;
+}
+
+function emptyData() {
+  return { people: [...DEFAULT_PEOPLE], expenses: [], months: {} };
+}
+
+// Normaliza para que nunca falten campos.
 function normalize(d) {
   return {
     people: Array.isArray(d?.people) && d.people.length ? d.people : [...DEFAULT_PEOPLE],
@@ -39,52 +74,53 @@ function normalize(d) {
   };
 }
 
-function getGroup() { try { return localStorage.getItem(LS_GROUP) || ""; } catch { return ""; } }
-function setGroup(id) { try { id ? localStorage.setItem(LS_GROUP, id) : localStorage.removeItem(LS_GROUP); } catch {} }
-function saveBackup(data) { try { localStorage.setItem(LS_BACKUP, JSON.stringify(data)); } catch {} }
-function loadBackup() { try { const s = localStorage.getItem(LS_BACKUP); return s ? normalize(JSON.parse(s)) : null; } catch { return null; } }
-
 // ---- Estado -------------------------------------------------------------
 
 const state = {
   month: currentMonthKey(),
   data: emptyData(),
-  online: false,
+  sha: null,      // sha del data.json actual (necesario para escribir)
+  online: false,  // se pudo leer del repo
+  connected: false, // hay llave válida guardada
   busy: false,
 };
+
 let pollTimer = null;
 
 // ---- Elementos ----------------------------------------------------------
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  noGroup: $("no-group"),
-  createGroupBtn: $("create-group-btn"),
-  appSections: document.querySelectorAll(".app-only"),
   monthPicker: $("month-picker"),
   connBadge: $("conn-badge"),
-  shareBtn: $("share-btn"),
+  accountBtn: $("account-btn"),
   form: $("expense-form"),
   addBtn: $("add-btn"),
   personSelect: $("person-select"),
   descInput: $("desc-input"),
   amountInput: $("amount-input"),
+  readonlyHint: $("readonly-hint"),
   summary: $("summary"),
   grandTotal: $("grand-total"),
   paidBySelect: $("paidby-select"),
   settlement: $("settlement"),
   expenseList: $("expense-list"),
+  repoLabel: $("repo-label"),
   managePeopleBtn: $("manage-people-btn"),
   peopleDialog: $("people-dialog"),
   peopleInputs: $("people-inputs"),
   addPersonBtn: $("add-person-btn"),
   savePeopleBtn: $("save-people-btn"),
   cancelPeopleBtn: $("cancel-people-btn"),
-  shareDialog: $("share-dialog"),
+  accountDialog: $("account-dialog"),
+  tokenInput: $("token-input"),
+  tokenStatus: $("token-status"),
+  saveTokenBtn: $("save-token-btn"),
+  clearTokenBtn: $("clear-token-btn"),
+  cancelTokenBtn: $("cancel-token-btn"),
+  shareBlock: $("share-block"),
   shareLink: $("share-link"),
   copyLinkBtn: $("copy-link-btn"),
-  leaveGroupBtn: $("leave-group-btn"),
-  closeShareBtn: $("close-share-btn"),
   installBanner: $("install-banner"),
   installBtn: $("install-btn"),
   installDismiss: $("install-dismiss"),
@@ -92,135 +128,103 @@ const els = {
   iosCloseBtn: $("ios-close-btn"),
 };
 
-// ---- Almacenamiento (jsonblob) -----------------------------------------
+// ---- Acceso a GitHub (la "base de datos") ------------------------------
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
+function authHeaders() {
+  const t = getToken();
+  const h = { Accept: "application/vnd.github+json" };
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
 
-// fetch con detección clara de errores de red / bloqueo del navegador (CORS).
-async function apiFetch(url, opts) {
-  try {
-    return await fetch(url, opts);
-  } catch (e) {
-    const err = new Error("No se pudo contactar el servidor de datos (¿sin internet o bloqueado por el navegador?).");
-    err.network = true;
-    throw err;
+// Lee data.json del repo. Devuelve { data, sha }. Si no existe, data vacío.
+async function readRepo() {
+  const url = `${API}?ref=${encodeURIComponent(GITHUB.branch)}&t=${Date.now()}`;
+  const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+  if (res.status === 404) return { data: emptyData(), sha: null };
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  const json = await res.json();
+  let parsed = emptyData();
+  try { parsed = JSON.parse(b64decode((json.content || "").replace(/\n/g, ""))); } catch {}
+  return { data: normalize(parsed), sha: json.sha };
+}
+
+// Escribe data.json. Requiere sha (si el archivo existe). Devuelve el nuevo sha.
+async function writeRepo(data, sha, message) {
+  const body = {
+    message,
+    content: b64encode(JSON.stringify(data, null, 2)),
+    branch: GITHUB.branch,
+  };
+  if (sha) body.sha = sha;
+  const res = await fetch(API, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 409) { const e = new Error("conflict"); e.conflict = true; throw e; }
+  if (res.status === 401 || res.status === 403) {
+    let detail = ""; try { detail = (await res.json()).message || ""; } catch {}
+    const e = new Error(detail || "auth"); e.auth = true; e.detail = detail; throw e;
   }
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  return json.content.sha;
 }
 
-// Extrae el id del grupo de la respuesta (del cuerpo o, si no, de cabeceras).
-async function extractId(res) {
+// Aplica un cambio de forma segura: relee lo último, aplica, y escribe.
+// Reintenta si hubo un choque (otra persona escribió al mismo tiempo).
+async function mutate(applyFn, message) {
+  if (!getToken()) { openAccountDialog(); return false; }
+  state.busy = true;
+  renderStatus();
   try {
-    const j = await res.clone().json();
-    const id = j.Id || j.id || j._id || j.key || "";
-    if (id) return String(id);
-    if (j.uri) return String(j.uri).split("/").filter(Boolean).pop() || "";
-  } catch {}
-  const loc = res.headers.get("Location") || res.headers.get("X-jsonblob") || "";
-  return loc.split("/").filter(Boolean).pop() || "";
-}
-
-// Crea un grupo nuevo con los datos semilla. Devuelve el id.
-async function createGroup(seed) {
-  const res = await apiFetch(CONFIG.api, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(seed) });
-  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al crear el grupo.");
-  const id = await extractId(res);
-  if (!id) throw new Error("El servidor no devolvió el id del grupo.");
-  setGroup(id);
-  saveBackup(seed);
-  return id;
-}
-
-// Lee los datos del grupo actual.
-async function readGroup() {
-  const id = getGroup();
-  const res = await apiFetch(`${CONFIG.api}/${id}`, { headers: { Accept: "application/json" }, cache: "no-store" });
-  if (res.status === 404) { const e = new Error("expired"); e.expired = true; throw e; }
-  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al leer.");
-  const data = normalize(await res.json());
-  saveBackup(data);
-  return data;
-}
-
-// Escribe los datos del grupo actual.
-async function writeGroup(data) {
-  const id = getGroup();
-  const res = await apiFetch(`${CONFIG.api}/${id}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(data) });
-  if (res.status === 404) { const e = new Error("expired"); e.expired = true; throw e; }
-  if (!res.ok) throw new Error("El servidor devolvió HTTP " + res.status + " al guardar.");
-  saveBackup(data);
-}
-
-// Aplica un cambio: relee lo último, aplica y escribe (para pisar lo menos posible).
-async function mutate(applyFn) {
-  if (!getGroup()) { showNoGroup(); return false; }
-  state.busy = true; renderStatus();
-  try {
-    let base;
-    try { base = await readGroup(); } catch (e) { if (e.expired) { await handleExpired(); return false; } throw e; }
-    const next = normalize(base);
-    applyFn(next);
-    await writeGroup(next);
-    state.data = next; state.online = true;
-    render();
-    return true;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { data, sha } = await readRepo();
+      const next = normalize(data);
+      applyFn(next);
+      try {
+        const newSha = await writeRepo(next, sha, message);
+        state.data = next;
+        state.sha = newSha;
+        state.online = true;
+        render();
+        return true;
+      } catch (e) {
+        if (e.conflict) { await new Promise((r) => setTimeout(r, 300)); continue; }
+        throw e;
+      }
+    }
+    alert("Hubo muchos cambios al mismo tiempo. Probá de nuevo en un momento.");
+    return false;
   } catch (e) {
-    if (e.expired) { await handleExpired(); return false; }
     console.error(e);
-    alert("No se pudo guardar. Revisá tu conexión e intentá de nuevo.");
+    if (e.auth) {
+      alert(
+        "No se pudo guardar: la llave no tiene permiso de ESCRITURA.\n\n" +
+        (e.detail ? "GitHub dice: " + e.detail + "\n\n" : "") +
+        "Solución: en el token, Permissions → Contents debe estar en 'Read and write'."
+      );
+      openAccountDialog();
+    } else {
+      alert("No se pudo guardar. Revisá tu conexión.");
+    }
     return false;
   } finally {
-    state.busy = false; renderStatus();
+    state.busy = false;
+    renderStatus();
   }
-}
-
-// El grupo se borró por inactividad (jsonblob limpia blobs sin uso ~30 días).
-async function handleExpired() {
-  const backup = loadBackup() || state.data || emptyData();
-  const ok = confirm(
-    "El grupo compartido expiró por inactividad.\n\n¿Recrearlo con los datos que tenés guardados en este dispositivo? " +
-    "Vas a tener que pasarles el link nuevo a tus roomies."
-  );
-  if (!ok) return;
-  try {
-    await createGroup(normalize(backup));
-    state.data = normalize(backup); state.online = true;
-    render();
-    openShareDialog();
-  } catch (e) {
-    console.error(e);
-    alert("No se pudo recrear el grupo.");
-  }
-}
-
-// ---- Link del grupo -----------------------------------------------------
-
-function ingestGroupFromUrl() {
-  try {
-    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
-    const qs = new URLSearchParams(location.search);
-    const id = (hash.get(CONFIG.groupParam) || qs.get(CONFIG.groupParam) || "").trim();
-    if (id) {
-      setGroup(id);
-      history.replaceState(null, "", location.origin + location.pathname);
-      return true;
-    }
-  } catch {}
-  return false;
-}
-
-function buildShareLink() {
-  return `${location.origin}${location.pathname}#${CONFIG.groupParam}=${encodeURIComponent(getGroup())}`;
 }
 
 // ---- Carga y refresco ---------------------------------------------------
 
 async function refresh() {
-  if (!getGroup()) { showNoGroup(); return; }
   try {
-    state.data = await readGroup();
+    const { data, sha } = await readRepo();
+    state.data = data;
+    state.sha = sha;
     state.online = true;
   } catch (e) {
-    if (e.expired) { await handleExpired(); return; }
     console.error(e);
     state.online = false;
   }
@@ -229,50 +233,60 @@ async function refresh() {
 
 function schedulePolling() {
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => { if (getGroup() && !state.busy && !document.hidden) refresh(); }, POLL_MS);
+  const ms = state.connected ? POLL_MS_CONNECTED : POLL_MS_READONLY;
+  pollTimer = setInterval(() => { if (!state.busy && !document.hidden) refresh(); }, ms);
 }
 
 // ---- Cálculos -----------------------------------------------------------
 
 function monthExpenses() {
-  return state.data.expenses.filter((e) => e.month === state.month).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return state.data.expenses
+    .filter((e) => e.month === state.month)
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
+
 function totalsByPerson() {
   const totals = {};
   state.data.people.forEach((p) => (totals[p] = 0));
   monthExpenses().forEach((e) => { totals[e.person] = (totals[e.person] || 0) + Number(e.amount || 0); });
   return totals;
 }
-function grandTotal() { return monthExpenses().reduce((s, e) => s + Number(e.amount || 0), 0); }
-function paidByForMonth() { return state.data.months?.[state.month]?.paidBy || ""; }
+
+function grandTotal() {
+  return monthExpenses().reduce((s, e) => s + Number(e.amount || 0), 0);
+}
+
+function paidByForMonth() {
+  return state.data.months?.[state.month]?.paidBy || "";
+}
 
 // ---- Acciones -----------------------------------------------------------
 
 function addExpense(person, description, amount) {
-  return mutate((d) => { d.expenses.push({ id: uid(), month: state.month, person, description, amount, ts: Date.now() }); });
+  return mutate((d) => {
+    d.expenses.push({ id: uid(), month: state.month, person, description, amount, ts: Date.now() });
+  }, `Agregar gasto: ${description} (${person})`);
 }
-function removeExpense(id) { return mutate((d) => { d.expenses = d.expenses.filter((e) => e.id !== id); }); }
-function savePeople(people) { return mutate((d) => { d.people = people; }); }
+
+function removeExpense(id) {
+  return mutate((d) => { d.expenses = d.expenses.filter((e) => e.id !== id); }, "Eliminar gasto");
+}
+
+function savePeople(people) {
+  return mutate((d) => { d.people = people; }, "Actualizar nombres");
+}
+
 function setPaidBy(person) {
-  return mutate((d) => { d.months = d.months || {}; d.months[state.month] = { ...(d.months[state.month] || {}), paidBy: person }; });
-}
-
-// ---- Mostrar / ocultar pantallas ---------------------------------------
-
-function showNoGroup() {
-  els.noGroup.classList.remove("hidden");
-  els.appSections.forEach((s) => s.classList.add("hidden"));
-}
-function showApp() {
-  els.noGroup.classList.add("hidden");
-  els.appSections.forEach((s) => s.classList.remove("hidden"));
+  return mutate((d) => {
+    d.months = d.months || {};
+    d.months[state.month] = { ...(d.months[state.month] || {}), paidBy: person };
+  }, `Marcar pagador de ${state.month}`);
 }
 
 // ---- Render -------------------------------------------------------------
 
 function render() {
-  if (!getGroup()) { showNoGroup(); return; }
-  showApp();
+  els.repoLabel.textContent = `${GITHUB.owner}/${GITHUB.repo}`;
   renderStatus();
   renderPeopleControls();
   renderPaidBy();
@@ -282,23 +296,40 @@ function render() {
 }
 
 function renderStatus() {
+  state.connected = !!getToken();
   const badge = els.connBadge;
-  if (state.busy) { badge.textContent = "Guardando…"; badge.className = "conn-badge saving"; }
-  else if (!state.online) { badge.textContent = "Sin conexión"; badge.className = "conn-badge offline"; }
-  else { badge.textContent = "Compartido ✓"; badge.className = "conn-badge connected"; }
+  if (state.busy) {
+    badge.textContent = "Guardando…"; badge.className = "conn-badge saving";
+  } else if (!state.online) {
+    badge.textContent = "Sin conexión"; badge.className = "conn-badge offline";
+  } else if (state.connected) {
+    badge.textContent = "Conectado"; badge.className = "conn-badge connected";
+  } else {
+    badge.textContent = "Solo lectura"; badge.className = "conn-badge reading";
+  }
+  els.accountBtn.textContent = state.connected ? "🔑 Cuenta" : "🔑 Conectar";
+  const ro = !state.connected;
+  els.readonlyHint.classList.toggle("hidden", !ro);
+  els.addBtn.disabled = ro;
+  els.descInput.disabled = ro;
+  els.amountInput.disabled = ro;
+  els.personSelect.disabled = ro;
 }
 
 function renderPeopleControls() {
   const prev = els.personSelect.value;
-  els.personSelect.innerHTML = state.data.people.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`).join("");
+  els.personSelect.innerHTML = state.data.people
+    .map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`).join("");
   if (state.data.people.includes(prev)) els.personSelect.value = prev;
 }
 
 function renderPaidBy() {
   const cur = paidByForMonth();
-  els.paidBySelect.innerHTML = ['<option value="">— nadie —</option>']
-    .concat(state.data.people.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`)).join("");
+  const opts = ['<option value="">— nadie —</option>']
+    .concat(state.data.people.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`));
+  els.paidBySelect.innerHTML = opts.join("");
   els.paidBySelect.value = cur;
+  els.paidBySelect.disabled = !state.connected;
 }
 
 function renderSummary() {
@@ -331,22 +362,31 @@ function renderSettlement() {
 
 function renderList() {
   const items = monthExpenses();
-  if (!items.length) { els.expenseList.innerHTML = `<div class="empty">Todavía no hay gastos este mes.</div>`; return; }
+  if (!items.length) {
+    els.expenseList.innerHTML = `<div class="empty">Todavía no hay gastos este mes.</div>`;
+    return;
+  }
   els.expenseList.innerHTML = items.map((e) => {
     const color = colorFor(state.data.people, e.person);
+    const del = state.connected
+      ? `<button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar">✕</button>`
+      : `<span class="del-placeholder"></span>`;
     return `
       <div class="expense-item">
         <span class="tag" style="background:${color}">${escapeHtml(e.person)}</span>
         <span class="desc" title="${escapeAttr(e.description)}">${escapeHtml(e.description)}</span>
         <span class="val">${fmt(e.amount)}</span>
-        <button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar">✕</button>
+        ${del}
       </div>`;
   }).join("");
 }
 
 // ---- Modal editar nombres ----------------------------------------------
 
-function openPeopleDialog() { renderPeopleInputs(state.data.people); els.peopleDialog.showModal(); }
+function openPeopleDialog() {
+  renderPeopleInputs(state.data.people);
+  els.peopleDialog.showModal();
+}
 function renderPeopleInputs(people) {
   els.peopleInputs.innerHTML = people.map((p, i) => `
     <div class="person-input-row">
@@ -355,7 +395,8 @@ function renderPeopleInputs(people) {
     </div>`).join("");
   els.peopleInputs.querySelectorAll(".remove").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      if (els.peopleInputs.querySelectorAll(".person-input-row").length > 1) e.target.closest(".person-input-row").remove();
+      if (els.peopleInputs.querySelectorAll(".person-input-row").length > 1)
+        e.target.closest(".person-input-row").remove();
     });
   });
 }
@@ -363,18 +404,89 @@ function collectPeopleFromInputs() {
   return [...els.peopleInputs.querySelectorAll("input")].map((i) => i.value.trim()).filter((v) => v.length > 0);
 }
 
-// ---- Modal compartir ----------------------------------------------------
+// ---- Modal llave (token) ------------------------------------------------
 
-function openShareDialog() {
-  els.shareLink.value = getGroup() ? buildShareLink() : "";
-  els.shareDialog.showModal();
+function openAccountDialog() {
+  els.tokenInput.value = getToken();
+  els.tokenStatus.textContent = "";
+  els.tokenStatus.className = "token-status";
+  refreshShareBlock();
+  els.accountDialog.showModal();
 }
+
+// Muestra el link para compartir solo si ya hay una llave guardada.
+function refreshShareBlock() {
+  const has = !!getToken();
+  els.shareBlock.classList.toggle("hidden", !has);
+  if (has) els.shareLink.value = buildShareLink();
+}
+
 async function copyShareLink() {
   const link = buildShareLink();
-  try { await navigator.clipboard.writeText(link); }
-  catch { els.shareLink.select(); document.execCommand("copy"); }
-  els.copyLinkBtn.textContent = "¡Copiado!";
+  try {
+    await navigator.clipboard.writeText(link);
+    els.copyLinkBtn.textContent = "¡Copiado!";
+  } catch {
+    els.shareLink.select();
+    document.execCommand("copy");
+    els.copyLinkBtn.textContent = "¡Copiado!";
+  }
   setTimeout(() => { els.copyLinkBtn.textContent = "Copiar"; }, 1500);
+}
+
+// Prueba REAL de permiso de escritura: crea un archivo temporal y lo borra.
+// No sirve mirar `permissions.push` del repo, porque para el DUEÑO siempre da
+// true (refleja tu rol de dueño, no lo que la llave permite realmente).
+async function testWriteAccess() {
+  const probePath = ".splitsuper-access-check";
+  const url = `https://api.github.com/repos/${GITHUB.owner}/${GITHUB.repo}/contents/${probePath}`;
+  const put = await fetch(url, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "Verificar acceso de escritura (Split Súper)", content: b64encode("ok"), branch: GITHUB.branch }),
+  });
+  if (put.status === 401) return { ok: false, message: "La llave no es válida (revisala)." };
+  if (put.status === 403) {
+    let d = ""; try { d = (await put.json()).message || ""; } catch {}
+    return { ok: false, message: "La llave no tiene permiso de escritura. En el token, Permissions → Contents debe estar en 'Read and write'." + (d ? " (" + d + ")" : "") };
+  }
+  if (put.status === 422) return { ok: true }; // el archivo ya existía: igual pudo escribir
+  if (put.status !== 200 && put.status !== 201) return { ok: false, message: "No se pudo verificar (GitHub " + put.status + ")." };
+  // Limpieza: borrar el archivo de prueba.
+  try {
+    const sha = (await put.json())?.content?.sha;
+    if (sha) {
+      await fetch(url, {
+        method: "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Limpiar verificación (Split Súper)", sha, branch: GITHUB.branch }),
+      });
+    }
+  } catch {}
+  return { ok: true };
+}
+
+async function verifyAndSaveToken() {
+  const t = els.tokenInput.value.trim();
+  if (!t) { els.tokenStatus.textContent = "Pegá una llave o tocá Desconectar."; els.tokenStatus.className = "token-status warn"; return; }
+  els.tokenStatus.textContent = "Verificando permiso de escritura…"; els.tokenStatus.className = "token-status";
+  setToken(t); // authHeaders() la usa para la prueba
+  try {
+    const res = await testWriteAccess();
+    if (!res.ok) throw new Error(res.message);
+    els.tokenStatus.textContent = "✅ ¡Llave válida y con permiso de escritura! Ya podés guardar.";
+    els.tokenStatus.className = "token-status ok";
+    state.connected = true;
+    schedulePolling();
+    refreshShareBlock();
+    refresh();
+  } catch (e) {
+    setToken("");
+    state.connected = false;
+    refreshShareBlock();
+    els.tokenStatus.textContent = "❌ " + (e.message || "No se pudo validar la llave.");
+    els.tokenStatus.className = "token-status warn";
+  }
 }
 
 // ---- Escapado seguro ----------------------------------------------------
@@ -387,25 +499,11 @@ function escapeAttr(s) { return escapeHtml(s); }
 // ---- Eventos ------------------------------------------------------------
 
 function wireEvents() {
-  els.createGroupBtn.addEventListener("click", async () => {
-    els.createGroupBtn.disabled = true;
-    els.createGroupBtn.textContent = "Creando…";
-    try {
-      await createGroup(emptyData());
-      state.data = emptyData();
-      render();
-      openShareDialog();
-    } catch (e) {
-      console.error(e);
-      alert("No se pudo crear el grupo.\n\nDetalle: " + (e.message || e));
-    } finally {
-      els.createGroupBtn.disabled = false;
-      els.createGroupBtn.textContent = "➕ Crear grupo compartido";
-    }
-  });
-
   els.monthPicker.value = state.month;
-  els.monthPicker.addEventListener("change", () => { state.month = els.monthPicker.value || currentMonthKey(); render(); });
+  els.monthPicker.addEventListener("change", () => {
+    state.month = els.monthPicker.value || currentMonthKey();
+    render();
+  });
 
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -423,7 +521,9 @@ function wireEvents() {
     if (confirm("¿Eliminar este gasto?")) await removeExpense(btn.dataset.id);
   });
 
-  els.paidBySelect.addEventListener("change", async () => { await setPaidBy(els.paidBySelect.value); });
+  els.paidBySelect.addEventListener("change", async () => {
+    await setPaidBy(els.paidBySelect.value);
+  });
 
   els.managePeopleBtn.addEventListener("click", openPeopleDialog);
   els.addPersonBtn.addEventListener("click", () => {
@@ -440,19 +540,27 @@ function wireEvents() {
     await savePeople(people);
   });
 
-  // Compartir
-  els.shareBtn.addEventListener("click", openShareDialog);
-  els.copyLinkBtn.addEventListener("click", copyShareLink);
-  els.closeShareBtn.addEventListener("click", () => els.shareDialog.close());
-  els.leaveGroupBtn.addEventListener("click", () => {
-    if (!confirm("¿Salir del grupo en este dispositivo? (No borra los datos; podés volver con el link).")) return;
-    setGroup("");
-    els.shareDialog.close();
-    showNoGroup();
+  // Modal llave
+  els.accountBtn.addEventListener("click", openAccountDialog);
+  els.saveTokenBtn.addEventListener("click", verifyAndSaveToken);
+  els.clearTokenBtn.addEventListener("click", () => {
+    setToken("");
+    state.connected = false;
+    els.tokenInput.value = "";
+    els.tokenStatus.textContent = "Desconectado. Quedás en modo lectura.";
+    els.tokenStatus.className = "token-status";
+    refreshShareBlock();
+    schedulePolling();
+    render();
   });
+  els.copyLinkBtn.addEventListener("click", copyShareLink);
+  els.cancelTokenBtn.addEventListener("click", () => els.accountDialog.close());
 
+  // Refrescar al volver a la pestaña
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 }
+
+// ---- Arranque -----------------------------------------------------------
 
 // ---- Instalación como app (PWA) ----------------------------------------
 
@@ -471,20 +579,15 @@ function showInstallBanner() {
 function hideInstallBanner() { els.installBanner.classList.add("hidden"); }
 
 function initInstall() {
-  // Registrar el service worker (necesario para que sea instalable y ande offline).
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
-
-  // Android/Chrome: guardamos el evento y mostramos el cartel con botón "Instalar".
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e;
     showInstallBanner();
   });
   window.addEventListener("appinstalled", () => { deferredPrompt = null; hideInstallBanner(); });
-
-  // iPhone no dispara beforeinstallprompt: si no está instalada, mostramos el cartel igual.
   if (isIOS() && !isStandalone()) showInstallBanner();
 
   els.installBtn.addEventListener("click", async () => {
@@ -493,14 +596,10 @@ function initInstall() {
       try { await deferredPrompt.userChoice; } catch {}
       deferredPrompt = null;
       hideInstallBanner();
-    } else if (isIOS()) {
-      els.iosDialog.showModal();
     } else {
-      // Navegador sin soporte de instalación automática.
       els.iosDialog.showModal();
     }
   });
-
   els.installDismiss.addEventListener("click", () => {
     hideInstallBanner();
     try { localStorage.setItem(LS_INSTALL_DISMISS, "1"); } catch {}
@@ -513,10 +612,15 @@ function initInstall() {
 async function start() {
   wireEvents();
   initInstall();
-  ingestGroupFromUrl();
-  if (getGroup()) { render(); await refresh(); }
-  else { showNoGroup(); }
+  const gotKeyFromLink = ingestKeyFromUrl();
+  state.connected = !!getToken();
+  render();
+  await refresh();
   schedulePolling();
+  // Si entraron por el link mágico, avisamos que ya quedó listo.
+  if (gotKeyFromLink && state.connected) {
+    els.connBadge.textContent = "¡Conectado!";
+  }
 }
 
 start();

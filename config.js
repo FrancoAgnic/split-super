@@ -1,9 +1,10 @@
-// ⚙️ Configuración.
-// Los datos se guardan en un almacén JSON gratis y SIN login.
-// Cada "grupo" es un bin con un id, y ese id viaja en el link que compartís.
-// No hay tokens ni permisos: quien tiene el link, ve y edita.
+// ⚙️ Configuración del repositorio que hace de "servidor".
+// Los gastos se guardan en el archivo data.json de este mismo repo,
+// usando la API de GitHub. No hace falta ningún otro servicio.
 
-export const CONFIG = {
-  api: "https://json.extendsclass.com/bin",
-  groupParam: "g",   // el link comparte el grupo así: ...#g=<id>
+export const GITHUB = {
+  owner: "FrancoAgnic",   // dueño del repo
+  repo: "split-super",    // nombre del repo
+  branch: "main",         // rama donde se guardan los datos
+  dataPath: "data.json",  // archivo que hace de base de datos
 };

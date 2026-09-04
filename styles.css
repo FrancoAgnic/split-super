@@ -84,7 +84,7 @@ body {
   display: flex; align-items: center; gap: 12px; justify-content: space-between;
   background: linear-gradient(135deg, #4f46e5, #6366f1);
   border: 1px solid #6d6af1; border-radius: var(--radius);
-  padding: 12px 14px; margin-top: 8px; box-shadow: var(--shadow);
+  padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--shadow);
 }
 .install-text { display: flex; flex-direction: column; gap: 2px; }
 .install-text b { font-size: 0.95rem; }
@@ -93,16 +93,8 @@ body {
 .install-actions .btn-primary { background: #fff; color: #3730a3; }
 .install-actions .btn-primary:hover { background: #eef; }
 .install-actions .btn-ghost { border-color: rgba(255,255,255,0.4); color: #fff; }
-
 .ios-steps { margin: 8px 0 0; padding-left: 20px; color: var(--text); font-size: 0.9rem; line-height: 1.5; }
 .ios-steps li { margin-bottom: 8px; }
-
-/* Pantalla inicial sin grupo */
-.no-group { text-align: center; }
-.no-group h2 { margin-top: 6px; }
-.no-group p { color: var(--muted); margin: 8px auto 16px; max-width: 42ch; }
-.btn-primary.big { font-size: 1.05rem; padding: 14px 22px; width: 100%; max-width: 340px; }
-.no-group .hint { margin-top: 16px; }
 
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }

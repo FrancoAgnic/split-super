@@ -34,28 +34,20 @@
       <p class="subtitle">Cada uno paga lo que compró — un solo pago, cuentas claras.</p>
     </header>
 
-    <!-- Pantalla inicial: sin grupo -->
-    <section id="no-group" class="card no-group hidden">
-      <h2>Empezá tu grupo</h2>
-      <p>Creá un grupo compartido y pasales el link a tus roomies. Todos van a ver y editar los mismos gastos — <b>sin cuentas, sin contraseñas, nada</b>.</p>
-      <button id="create-group-btn" class="btn-primary big" type="button">➕ Crear grupo compartido</button>
-      <p class="hint">¿Te pasaron un link? Abrilo y ya entrás al grupo automáticamente.</p>
-    </section>
-
-    <!-- Barra de estado -->
-    <section class="card statusbar app-only hidden">
+    <!-- Barra de estado / conexión -->
+    <section class="card statusbar">
       <div class="month-row">
         <label for="month-picker">Mes</label>
         <input type="month" id="month-picker" />
       </div>
       <div class="conn">
-        <span id="conn-badge" class="conn-badge reading">…</span>
-        <button id="share-btn" class="btn-ghost" type="button">📲 Compartir</button>
+        <span id="conn-badge" class="conn-badge reading" title="Estado">Cargando…</span>
+        <button id="account-btn" class="btn-ghost" type="button">🔑 Conectar</button>
       </div>
     </section>
 
     <!-- Formulario para agregar gasto -->
-    <section class="card app-only hidden">
+    <section class="card">
       <h2>Agregar gasto</h2>
       <form id="expense-form" class="expense-form">
         <div class="field">
@@ -72,10 +64,13 @@
         </div>
         <button type="submit" class="btn-primary" id="add-btn">Agregar</button>
       </form>
+      <p id="readonly-hint" class="readonly-hint hidden">
+        👀 Estás en <b>modo lectura</b>. Para cargar o borrar gastos, tocá <b>🔑 Conectar</b> y pegá la llave de acceso.
+      </p>
     </section>
 
     <!-- Resumen por persona -->
-    <section class="card app-only hidden">
+    <section class="card">
       <div class="summary-head">
         <h2>Resumen del mes</h2>
         <div class="paidby">
@@ -92,7 +87,7 @@
     </section>
 
     <!-- Lista de gastos -->
-    <section class="card app-only hidden">
+    <section class="card">
       <div class="summary-head">
         <h2>Detalle de gastos</h2>
         <button id="manage-people-btn" class="btn-ghost" type="button">Editar nombres</button>
@@ -101,7 +96,7 @@
     </section>
 
     <footer class="app-footer">
-      <p>App casual entre amigos · los datos se comparten con el link del grupo.</p>
+      <p>Los datos se guardan en GitHub (<code id="repo-label">este repo</code>). GitHub es el servidor.</p>
     </footer>
   </div>
 
@@ -120,19 +115,41 @@
     </form>
   </dialog>
 
-  <!-- Modal para compartir el grupo -->
-  <dialog id="share-dialog">
+  <!-- Modal para la llave de acceso (token) -->
+  <dialog id="account-dialog">
     <form method="dialog" class="people-form">
-      <h2>📲 Compartir grupo</h2>
-      <p class="hint">Mandales este link a tus roomies. Con solo abrirlo entran al grupo y pueden ver y editar todo.</p>
-      <div class="share-row">
-        <input type="text" id="share-link" readonly />
-        <button type="button" id="copy-link-btn" class="btn-primary">Copiar</button>
+      <h2>🔑 Conectar para guardar</h2>
+      <p class="hint">
+        Para <b>guardar</b> gastos en GitHub hace falta una llave de acceso (token).
+        Pegá acá la llave que te pasaron. Se guarda <b>solo en este dispositivo</b>, nunca se sube al repo.
+        <a href="https://github.com/FrancoAgnic/split-super#readme" target="_blank" rel="noopener">¿Cómo consigo la llave?</a>
+      </p>
+      <div class="field">
+        <label for="token-input">Llave de acceso</label>
+        <input type="password" id="token-input" placeholder="github_pat_..." autocomplete="off" />
       </div>
+      <div id="token-status" class="token-status"></div>
+
+      <!-- Bloque para compartir: solo aparece cuando ya estás conectado -->
+      <div id="share-block" class="share-block hidden">
+        <hr />
+        <h3>📲 Sumar a los demás</h3>
+        <p class="hint">
+          Mandales este link (por WhatsApp, privado). Con solo <b>abrirlo</b>, la app les queda lista para
+          guardar — <b>no tienen que configurar nada</b>.
+        </p>
+        <div class="share-row">
+          <input type="text" id="share-link" readonly />
+          <button type="button" id="copy-link-btn" class="btn-primary">Copiar</button>
+        </div>
+        <p class="hint small">⚠️ Compartilo solo con tus compañeros, no lo publiques (la llave viaja dentro del link).</p>
+      </div>
+
       <div class="dialog-actions">
-        <button type="button" id="leave-group-btn" class="btn-ghost">Salir del grupo</button>
+        <button type="button" id="clear-token-btn" class="btn-ghost">Desconectar</button>
         <div class="spacer"></div>
-        <button type="button" id="close-share-btn" class="btn-primary">Cerrar</button>
+        <button type="button" id="cancel-token-btn" class="btn-ghost">Cerrar</button>
+        <button type="button" id="save-token-btn" class="btn-primary">Guardar llave</button>
       </div>
     </form>
   </dialog>
