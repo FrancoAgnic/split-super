@@ -5,6 +5,15 @@
     "Osqui ayuwoki",
     "Frankiki"
   ],
-  "expenses": [],
+  "expenses": [
+    {
+      "id": "mtniw48jbxr0a",
+      "month": "2026-09",
+      "person": "Darkiki",
+      "description": "Leche",
+      "amount": 12,
+      "ts": 1788560751476
+    }
+  ],
   "months": {}
 }
