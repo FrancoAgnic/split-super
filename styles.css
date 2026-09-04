@@ -118,6 +118,20 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 .field.grow { grid-column: span 1; }
 .field label { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
 
+/* Interruptor "Compartido" */
+.shared-toggle {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card-2); border: 1px solid var(--border);
+  padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 0.9rem;
+}
+.shared-toggle input { width: auto; flex: 0 0 auto; transform: scale(1.2); accent-color: var(--primary); }
+
+/* Etiqueta de gasto común */
+.expense-item .tag.tag-shared {
+  background: #11224a; color: var(--accent); border: 1px solid var(--accent);
+}
+
 input, select, button {
   font: inherit;
   color: var(--text);

@@ -97,6 +97,8 @@ const els = {
   form: $("expense-form"),
   addBtn: $("add-btn"),
   personSelect: $("person-select"),
+  personField: $("person-field"),
+  sharedInput: $("shared-input"),
   descInput: $("desc-input"),
   amountInput: $("amount-input"),
   readonlyHint: $("readonly-hint"),
@@ -247,8 +249,19 @@ function monthExpenses() {
 
 function totalsByPerson() {
   const totals = {};
-  state.data.people.forEach((p) => (totals[p] = 0));
-  monthExpenses().forEach((e) => { totals[e.person] = (totals[e.person] || 0) + Number(e.amount || 0); });
+  const people = state.data.people;
+  people.forEach((p) => (totals[p] = 0));
+  const n = people.length || 1;
+  monthExpenses().forEach((e) => {
+    const amt = Number(e.amount || 0);
+    if (e.shared) {
+      // Gasto común: se divide en partes iguales entre todos.
+      const share = amt / n;
+      people.forEach((p) => { totals[p] = (totals[p] || 0) + share; });
+    } else {
+      totals[e.person] = (totals[e.person] || 0) + amt;
+    }
+  });
   return totals;
 }
 
@@ -262,10 +275,10 @@ function paidByForMonth() {
 
 // ---- Acciones -----------------------------------------------------------
 
-function addExpense(person, description, amount) {
+function addExpense(person, description, amount, shared) {
   return mutate((d) => {
-    d.expenses.push({ id: uid(), month: state.month, person, description, amount, ts: Date.now() });
-  }, `Agregar gasto: ${description} (${person})`);
+    d.expenses.push({ id: uid(), month: state.month, person: shared ? "" : person, description, amount, shared: !!shared, ts: Date.now() });
+  }, `Agregar gasto: ${description} (${shared ? "compartido" : person})`);
 }
 
 function removeExpense(id) {
@@ -367,13 +380,15 @@ function renderList() {
     return;
   }
   els.expenseList.innerHTML = items.map((e) => {
-    const color = colorFor(state.data.people, e.person);
     const del = state.connected
       ? `<button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar">✕</button>`
       : `<span class="del-placeholder"></span>`;
+    const tag = e.shared
+      ? `<span class="tag tag-shared" title="Compartido entre todos">🤝 Común</span>`
+      : `<span class="tag" style="background:${colorFor(state.data.people, e.person)}">${escapeHtml(e.person)}</span>`;
     return `
       <div class="expense-item">
-        <span class="tag" style="background:${color}">${escapeHtml(e.person)}</span>
+        ${tag}
         <span class="desc" title="${escapeAttr(e.description)}">${escapeHtml(e.description)}</span>
         <span class="val">${fmt(e.amount)}</span>
         ${del}
@@ -496,6 +511,13 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
+// Muestra/oculta el selector de persona según si el gasto es compartido.
+function updateSharedUI() {
+  const shared = els.sharedInput.checked;
+  els.personField.classList.toggle("hidden", shared);
+  els.personSelect.disabled = shared;
+}
+
 // ---- Eventos ------------------------------------------------------------
 
 function wireEvents() {
@@ -505,14 +527,22 @@ function wireEvents() {
     render();
   });
 
+  els.sharedInput.addEventListener("change", updateSharedUI);
+
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const shared = els.sharedInput.checked;
     const person = els.personSelect.value;
     const description = els.descInput.value.trim();
     const amount = Number(els.amountInput.value);
-    if (!person || !description || !(amount > 0)) return;
-    const ok = await addExpense(person, description, amount);
-    if (ok) { els.descInput.value = ""; els.amountInput.value = ""; els.descInput.focus(); }
+    if (!description || !(amount > 0)) return;
+    if (!shared && !person) return; // individual necesita persona
+    const ok = await addExpense(person, description, amount, shared);
+    if (ok) {
+      els.descInput.value = ""; els.amountInput.value = "";
+      els.sharedInput.checked = false; updateSharedUI();
+      els.descInput.focus();
+    }
   });
 
   els.expenseList.addEventListener("click", async (e) => {

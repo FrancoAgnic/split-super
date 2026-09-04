@@ -2,7 +2,7 @@
 // Cachea la app para que funcione como app instalada y también sin conexión.
 // Los datos (jsonblob.com) NUNCA se cachean: siempre van a la red.
 
-const CACHE = "splitsuper-v3";
+const CACHE = "splitsuper-v4";
 const ASSETS = [
   "./",
   "./index.html",

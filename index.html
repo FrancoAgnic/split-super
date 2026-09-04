@@ -50,9 +50,13 @@
     <section class="card">
       <h2>Agregar gasto</h2>
       <form id="expense-form" class="expense-form">
-        <div class="field">
+        <label class="shared-toggle">
+          <input type="checkbox" id="shared-input" />
+          <span>🤝 <b>Compartido</b> entre todos (se divide en partes iguales)</span>
+        </label>
+        <div class="field" id="person-field">
           <label for="person-select">¿De quién es?</label>
-          <select id="person-select" required></select>
+          <select id="person-select"></select>
         </div>
         <div class="field grow">
           <label for="desc-input">Descripción</label>
