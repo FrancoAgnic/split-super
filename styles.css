@@ -79,6 +79,13 @@ body {
 
 .del-placeholder { width: 22px; }
 
+/* Pantalla inicial sin grupo */
+.no-group { text-align: center; }
+.no-group h2 { margin-top: 6px; }
+.no-group p { color: var(--muted); margin: 8px auto 16px; max-width: 42ch; }
+.btn-primary.big { font-size: 1.05rem; padding: 14px 22px; width: 100%; max-width: 340px; }
+.no-group .hint { margin-top: 16px; }
+
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 
